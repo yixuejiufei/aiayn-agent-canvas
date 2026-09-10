@@ -725,8 +725,8 @@ export default function AgentEditor({
   demoOutput?: string | null;
   waitingQuestion?: string | null;
   waitingChoices?: Array<{ file_id: string; name: string; directory?: string }>;
-  waitingResponseSchema?: { type: 'file_selection'; source_observation: string; candidate_file_ids: string[]; allow_custom_input: boolean } | null;
-  onSubmitUserInput?: (input: string, selectionId?: string) => Promise<void>;
+  waitingResponseSchema?: { type: 'file_selection'; source_observation: string; candidate_file_ids: string[]; allow_custom_input: boolean; selection_mode?: 'single' | 'multiple'; min_selections?: number; max_selections?: number } | null;
+  onSubmitUserInput?: (input: string, selectionId?: string, selectionIds?: string[]) => Promise<void>;
   onExitDemo?: () => void;
   localModels?: LocalModelProfile[];
   localDevices?: LocalExecutionDevice[];
@@ -761,6 +761,7 @@ export default function AgentEditor({
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
   const [runtimeClockMs, setRuntimeClockMs] = useState(() => Date.now());
   const [waitingInput, setWaitingInput] = useState('');
+  const [waitingSelectionIds, setWaitingSelectionIds] = useState<string[]>([]);
   const [waitingSubmitError, setWaitingSubmitError] = useState<string | null>(null);
   const [waitingSubmitting, setWaitingSubmitting] = useState(false);
 
@@ -919,6 +920,10 @@ export default function AgentEditor({
   const waitingEvent = [...displayedDemoEvents].reverse().find((event) => event.type === 'agent.waiting_user');
   const visibleWaitingQuestion = waitingQuestion || (typeof waitingEvent?.data.question === 'string' ? waitingEvent.data.question : '请补充 Agent 所需的信息。');
   const allowsCustomWaitingInput = waitingResponseSchema?.type !== 'file_selection' || waitingResponseSchema.allow_custom_input;
+  const multipleFileSelection = waitingResponseSchema?.type === 'file_selection' && waitingResponseSchema.selection_mode === 'multiple';
+  const waitingMinSelections = waitingResponseSchema?.min_selections ?? 1;
+  const waitingMaxSelections = waitingResponseSchema?.max_selections ?? (multipleFileSelection ? waitingChoices.length : 1);
+  const activeWaitingSelectionIds = waitingSelectionIds.filter((fileId) => waitingChoices.some((choice) => choice.file_id === fileId));
   const demoFocusId = (() => {
     if (demoPendingPhase === 'llm') return document.nodes.find((node) => node.type === 'agent')?.id || null;
     if (demoPendingPhase === 'context') return document.nodes.find((node) => node.type === 'input')?.id || null;
@@ -1299,14 +1304,15 @@ export default function AgentEditor({
     setStatus('工作流 JSON 已导出');
   }
 
-  async function submitWaitingInput(inputOverride?: string, selectionId?: string) {
+  async function submitWaitingInput(inputOverride?: string, selectionId?: string, selectionIds?: string[]) {
     const input = (inputOverride ?? waitingInput).trim();
-    if ((!input && !selectionId) || !onSubmitUserInput) return;
+    if ((!input && !selectionId && !selectionIds?.length) || !onSubmitUserInput) return;
     setWaitingSubmitting(true);
     setWaitingSubmitError(null);
     try {
-      await onSubmitUserInput(input, selectionId);
+      await onSubmitUserInput(input, selectionId, selectionIds);
       setWaitingInput('');
+      setWaitingSelectionIds([]);
     } catch (reason) {
       setWaitingSubmitError(reason instanceof Error ? reason.message : String(reason));
     } finally {
@@ -1426,21 +1432,25 @@ export default function AgentEditor({
           <div style={{ marginTop: 6, color: '#3f4652', fontSize: 14, lineHeight: 1.45 }}>{visibleWaitingQuestion}</div>
           {waitingChoices.length > 0 && (
             <div style={{ display: 'grid', gap: 6, marginTop: 10 }}>
-              <div style={{ color: '#697386', fontSize: 12 }}>从已搜索到的文件中选择（仅这些按钮会提交已验证的文件标识）：</div>
+              <div style={{ color: '#697386', fontSize: 12 }}>{multipleFileSelection ? `从已搜索到的文件中勾选 ${waitingMinSelections}-${waitingMaxSelections} 个（LLM 请求多选）：` : '从已搜索到的文件中选择（LLM 请求单选）：'}</div>
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                 {waitingChoices.map((choice) => (
                   <button
                     key={choice.file_id}
                     type="button"
                     disabled={waitingSubmitting || !onSubmitUserInput}
-                    onClick={() => { void submitWaitingInput(choice.name, choice.file_id); }}
+                    onClick={() => {
+                      if (!multipleFileSelection) { void submitWaitingInput(choice.name, choice.file_id); return; }
+                      setWaitingSelectionIds((current) => current.includes(choice.file_id) ? current.filter((fileId) => fileId !== choice.file_id) : current.length >= waitingMaxSelections ? current : [...current, choice.file_id]);
+                    }}
                     title={choice.directory ? `${choice.directory}/${choice.name}` : choice.name}
-                    style={{ padding: '6px 9px', border: '1px solid #d9aa4a', borderRadius: 7, background: '#fff', color: '#6e4a08', fontSize: 12, fontWeight: 700 }}
+                    style={{ padding: '6px 9px', border: '1px solid #d9aa4a', borderRadius: 7, background: multipleFileSelection && activeWaitingSelectionIds.includes(choice.file_id) ? '#ffe9b5' : '#fff', color: '#6e4a08', fontSize: 12, fontWeight: 700 }}
                   >
-                    {choice.name}{choice.directory ? ` · ${choice.directory}` : ''}
+                    {multipleFileSelection && activeWaitingSelectionIds.includes(choice.file_id) ? '✓ ' : ''}{choice.name}{choice.directory ? ` · ${choice.directory}` : ''}
                   </button>
                 ))}
               </div>
+              {multipleFileSelection && <button type="button" onClick={() => void submitWaitingInput(activeWaitingSelectionIds.map((fileId) => waitingChoices.find((choice) => choice.file_id === fileId)?.name || fileId).join('、'), undefined, activeWaitingSelectionIds)} disabled={waitingSubmitting || !onSubmitUserInput || activeWaitingSelectionIds.length < waitingMinSelections} style={{ justifySelf: 'start', padding: '6px 10px', fontSize: 12 }}>确认 {activeWaitingSelectionIds.length} 个文件并续跑</button>}
             </div>
           )}
           {allowsCustomWaitingInput && <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
@@ -1448,7 +1458,7 @@ export default function AgentEditor({
               autoFocus
               value={waitingInput}
               onChange={(event) => setWaitingInput(event.target.value)}
-              placeholder={waitingChoices.length ? '或输入完整/部分文件名' : '输入补充信息后继续运行'}
+              placeholder={waitingChoices.length ? multipleFileSelection ? '或用逗号分隔输入多个完整/唯一文件名' : '或输入完整/部分文件名' : '输入补充信息后继续运行'}
               disabled={waitingSubmitting || !onSubmitUserInput}
               style={{ ...inputStyle, flex: 1, minWidth: 0 }}
             />

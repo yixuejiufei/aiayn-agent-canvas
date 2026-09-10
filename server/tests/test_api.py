@@ -97,6 +97,9 @@ def test_file_choice_case_browses_then_asks_user_before_reading() -> None:
         "source_observation": next(event["data"]["call_id"] for event in waiting_payload["events"] if event["type"] == "tool.end"),
         "candidate_file_ids": [choice["file_id"] for choice in waiting_payload["waiting_choices"]],
         "allow_custom_input": True,
+        "selection_mode": "single",
+        "min_selections": 1,
+        "max_selections": 1,
     }
     assert [event["node"] for event in waiting_payload["events"] if event["type"] == "tool.end"] == ["search_files"]
 

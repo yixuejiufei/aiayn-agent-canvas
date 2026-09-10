@@ -159,6 +159,9 @@ export interface WaitingResponseSchema {
   source_observation: string;
   candidate_file_ids: string[];
   allow_custom_input: boolean;
+  selection_mode?: 'single' | 'multiple';
+  min_selections?: number;
+  max_selections?: number;
 }
 
 export interface ReplayResponse {
@@ -281,11 +284,11 @@ export async function pauseRun(runId: string): Promise<RunResponse> {
   return request<RunResponse>('/runs/' + runId + '/pause', { method: 'POST' });
 }
 
-export async function resumeRun(runId: string, input?: string, selectionId?: string): Promise<RunResponse> {
+export async function resumeRun(runId: string, input?: string, selectionId?: string, selectionIds?: string[]): Promise<RunResponse> {
   return request<RunResponse>('/runs/' + runId + '/resume', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ...(input ? { input } : {}), ...(selectionId ? { selection_id: selectionId } : {}) }),
+    body: JSON.stringify({ ...(input ? { input } : {}), ...(selectionId ? { selection_id: selectionId } : {}), ...(selectionIds?.length ? { selection_ids: selectionIds } : {}) }),
   });
 }
 

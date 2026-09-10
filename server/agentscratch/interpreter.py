@@ -234,6 +234,9 @@ def _validated_file_selection_schema(raw_schema: Any, memory: dict[str, Any]) ->
     source = raw_schema.get("source_observation")
     candidate_ids = raw_schema.get("candidate_file_ids")
     allow_custom = raw_schema.get("allow_custom_input", True)
+    selection_mode = raw_schema.get("selection_mode", "single")
+    min_selections = raw_schema.get("min_selections", 1)
+    max_selections = raw_schema.get("max_selections", 1 if selection_mode == "single" else len(candidate_ids) if isinstance(candidate_ids, list) else 0)
     if not isinstance(source, str) or not source:
         raise ActionValidationError("file_selection response_schema requires source_observation")
     if not isinstance(candidate_ids, list) or not 1 <= len(candidate_ids) <= 3 or not all(isinstance(item, str) and item for item in candidate_ids):
@@ -242,6 +245,14 @@ def _validated_file_selection_schema(raw_schema: Any, memory: dict[str, Any]) ->
         raise ActionValidationError("file_selection response_schema candidate_file_ids must be unique")
     if not isinstance(allow_custom, bool):
         raise ActionValidationError("file_selection response_schema allow_custom_input must be boolean")
+    if selection_mode not in {"single", "multiple"}:
+        raise ActionValidationError("file_selection response_schema selection_mode must be single or multiple")
+    if isinstance(min_selections, bool) or not isinstance(min_selections, int) or isinstance(max_selections, bool) or not isinstance(max_selections, int):
+        raise ActionValidationError("file_selection response_schema selection limits must be integers")
+    if min_selections < 1 or max_selections < min_selections or max_selections > len(candidate_ids):
+        raise ActionValidationError("file_selection response_schema selection limits must fit candidate_file_ids")
+    if selection_mode == "single" and (min_selections != 1 or max_selections != 1):
+        raise ActionValidationError("single file_selection requires exactly one selection")
     catalog = _file_catalog_from_observation(memory, source)
     catalog_ids = {item["file_id"] for item in catalog}
     if not catalog:
@@ -253,6 +264,9 @@ def _validated_file_selection_schema(raw_schema: Any, memory: dict[str, Any]) ->
         "source_observation": source,
         "candidate_file_ids": candidate_ids,
         "allow_custom_input": allow_custom,
+        "selection_mode": selection_mode,
+        "min_selections": min_selections,
+        "max_selections": max_selections,
     }
 
 

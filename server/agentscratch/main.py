@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import httpx
 import sqlite3
 import time
@@ -492,61 +493,59 @@ def _resolve_file_selection(
     run: AgentRunState,
     user_input: str,
     selection_id: str | None,
+    selection_ids: list[str] | None,
 ) -> dict[str, Any] | None:
-    """Resolve explicit user file selection without inferring an ambiguous one."""
+    """Resolve one or more explicit choices without guessing file identity."""
     catalog = _waiting_file_catalog(run)
     if not catalog:
         return None
-    selected: dict[str, str] | None = None
+    schema = run.waiting_response_schema if isinstance(run.waiting_response_schema, dict) else {}
+    mode = schema.get("selection_mode", "single")
+    min_count = int(schema.get("min_selections", 1))
+    max_count = int(schema.get("max_selections", 1 if mode == "single" else len(catalog)))
+    explicit_ids = list(selection_ids or ([] if not selection_id else [selection_id]))
+    if selection_id and selection_ids:
+        raise HTTPException(status_code=400, detail="use selection_id or selection_ids, not both")
+    selected: list[dict[str, str]] = []
     source = ""
-    if selection_id:
-        selected = next((item for item in catalog if item["file_id"] == selection_id), None)
-        if selected is None:
+    if explicit_ids:
+        if len(set(explicit_ids)) != len(explicit_ids):
+            raise HTTPException(status_code=400, detail="selected files must be unique")
+        selected = [next((item for item in catalog if item["file_id"] == file_id), None) for file_id in explicit_ids]
+        if any(item is None for item in selected):
             raise HTTPException(status_code=400, detail="selected file is not in the current search Observation")
-        source = "choice_button"
+        source = "choice_buttons" if len(selected) > 1 else "choice_button"
     else:
-        schema = run.waiting_response_schema if isinstance(run.waiting_response_schema, dict) else {}
         if not schema.get("allow_custom_input", True):
             raise HTTPException(status_code=400, detail="this file selection requires choosing one of the offered options")
-        token = user_input.strip()
-        visible_choices = run.waiting_choices if isinstance(run.waiting_choices, list) else []
-        if token.isdigit() and 1 <= int(token) <= len(visible_choices):
-            choice_id = visible_choices[int(token) - 1].get("file_id") if isinstance(visible_choices[int(token) - 1], dict) else None
-            selected = next((item for item in catalog if item["file_id"] == choice_id), None)
-            source = "choice_number"
-        if selected is None:
+        tokens = [item.strip() for item in re.split(r"[,，、;；\n]+", user_input) if item.strip()]
+        if not tokens:
+            return {"status": "unmatched", "raw_input": user_input}
+        for token in tokens:
             normalized = token.casefold()
-            selected = next(
-                (
-                    item for item in catalog
-                    if normalized in {
-                        item["file_id"].casefold(),
-                        item["name"].casefold(),
-                        f"{item.get('directory', '').rstrip('/')}/{item['name']}".casefold(),
-                    }
-                ),
-                None,
-            )
-            source = "exact_name" if selected is not None else ""
-        if selected is None and token:
-            partial_matches = [item for item in catalog if token.casefold() in item["name"].casefold()]
-            if len(partial_matches) == 1:
-                selected, source = partial_matches[0], "unique_partial_name"
+            exact = next((item for item in catalog if normalized in {item["file_id"].casefold(), item["name"].casefold(), f"{item.get('directory', '').rstrip('/')}/{item['name']}".casefold()}), None)
+            partial_matches = [] if exact else [item for item in catalog if normalized in item["name"].casefold()]
+            if exact:
+                selected.append(exact)
+            elif len(partial_matches) == 1:
+                selected.append(partial_matches[0])
             elif len(partial_matches) > 1:
-                return {
-                    "status": "ambiguous",
-                    "raw_input": user_input,
-                    "candidates": partial_matches[:5],
-                }
-    if selected is None:
-        return {"status": "unmatched", "raw_input": user_input}
+                return {"status": "ambiguous", "raw_input": user_input, "candidates": partial_matches[:5]}
+            else:
+                return {"status": "unmatched", "raw_input": user_input}
+        if len({item["file_id"] for item in selected}) != len(selected):
+            return {"status": "ambiguous", "raw_input": user_input, "candidates": selected}
+        source = "custom_names" if len(selected) > 1 else "exact_name"
+    if (mode == "single" and len(selected) != 1) or not min_count <= len(selected) <= max_count:
+        raise HTTPException(status_code=400, detail=f"this {mode} file selection requires {min_count}-{max_count} files")
+    selected = [item for item in selected if item is not None]
     return {
         "status": "resolved",
         "source": source,
-        "raw_input": user_input or selected["name"],
-        "file_id": selected["file_id"],
-        "name": selected["name"],
-        "directory": selected.get("directory", ""),
+        "raw_input": user_input or ", ".join(item["name"] for item in selected),
+        "file_id": selected[0]["file_id"], "file_ids": [item["file_id"] for item in selected],
+        "name": selected[0]["name"], "names": [item["name"] for item in selected],
+        "directory": selected[0].get("directory", ""), "selection_mode": mode,
     }
 
 
@@ -563,14 +562,14 @@ def resume_run(
         )
     previous_status = run.status
     if run.status == RunStatus.WAITING_USER:
-        if request is None or (not request.input and not request.selection_id):
-            raise HTTPException(status_code=400, detail="input or selection_id is required to answer the waiting request")
+        if request is None or (not request.input and not request.selection_id and not request.selection_ids):
+            raise HTTPException(status_code=400, detail="input, selection_id, or selection_ids is required to answer the waiting request")
         if "pending_tool_calls" not in run.memory:
             answered_question = run.waiting_question or run.memory.get("last_asked_user_question")
             user_input = (request.input or "").strip()
-            selection = _resolve_file_selection(run, user_input, request.selection_id)
+            selection = _resolve_file_selection(run, user_input, request.selection_id, request.selection_ids)
             if selection and selection["status"] == "resolved" and not user_input:
-                user_input = str(selection["name"])
+                user_input = ", ".join(selection.get("names", [selection["name"]]))
             run.context.append({"role": "user", "content": user_input})
             if isinstance(answered_question, str) and answered_question.strip():
                 # This is a factual state marker, not a next-action command:
@@ -591,14 +590,16 @@ def resume_run(
                 run.memory["user_file_selection"] = selection
                 run.memory["file_read_authorization"] = {
                     "status": selection["status"],
-                    "allowed_file_ids": [selection["file_id"]] if selection["status"] == "resolved" else [],
+                    "allowed_file_ids": selection.get("file_ids", []) if selection["status"] == "resolved" else [],
                 }
                 if selection["status"] == "resolved":
+                    authorized_ids = ", ".join(selection.get("file_ids", []))
+                    authorized_names = ", ".join(selection.get("names", []))
                     selection_state = (
                         "USER_SELECTION_STATE\nstatus: resolved\n"
-                        f"source: {selection['source']}\nselected_name: {selection['name']}\n"
-                        f"file_id: {selection['file_id']}\n"
-                        "This file_id is verified from a successful search_files Observation. If read_file is needed, put it exactly in args.file_id; target is not a tool argument."
+                        f"source: {selection['source']}\nselection_mode: {selection.get('selection_mode', 'single')}\n"
+                        f"selected_names: {authorized_names}\nauthorized_file_ids: {authorized_ids}\n"
+                        "These file_ids are verified from a successful search_files Observation. If read_file is needed, use only these exact values in args.file_id; target is not a tool argument."
                     )
                 elif selection["status"] == "ambiguous":
                     candidates = ", ".join(item["name"] for item in selection["candidates"])

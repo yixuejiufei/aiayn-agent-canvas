@@ -140,6 +140,7 @@ class CreateRunRequest(BaseModel):
 class ResumeRunRequest(BaseModel):
     input: str | None = Field(default=None, min_length=1)
     selection_id: str | None = Field(default=None, min_length=1)
+    selection_ids: list[str] | None = Field(default=None, min_length=1, max_length=3)
 
 
 class CreateTeachingCaseRequest(BaseModel):

@@ -884,12 +884,12 @@ export default function App() {
     }
   }
 
-  async function resumeWorkflowFromCanvas(input: string, selectionId?: string) {
+  async function resumeWorkflowFromCanvas(input: string, selectionId?: string, selectionIds?: string[]) {
     if (!run || run.status !== 'waiting_user') return;
     setBusy(true);
     setError('');
     try {
-      updateRun(await resumeRun(run.run_id, input.trim(), selectionId));
+      updateRun(await resumeRun(run.run_id, input.trim(), selectionId, selectionIds));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
       throw reason;
