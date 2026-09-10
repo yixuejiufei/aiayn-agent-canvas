@@ -94,6 +94,24 @@ def test_duplicate_static_file_read_is_rejected_without_repeating_content() -> N
         validate_action(action, spec, memory)
 
 
+def test_file_selection_authorization_narrows_discovered_read_capability() -> None:
+    spec = MiniAgentSpec(
+        name="File Agent",
+        tools=[ToolSpec(name="read_file", description="read", parameters={"file_id": ToolParameterSpec(type="string")})],
+    )
+    read_a = AgentAction(thought="read chosen file", action="call_tool", tool="read_file", args={"file_id": "file-a"})
+    read_b = AgentAction(thought="read another file", action="call_tool", tool="read_file", args={"file_id": "file-b"})
+    base_memory = {"discovered_file_ids": ["file-a", "file-b"], "observations": {}}
+
+    with pytest.raises(ActionValidationError, match="has not uniquely selected"):
+        validate_action(read_a, spec, {**base_memory, "file_read_authorization": {"status": "unmatched", "allowed_file_ids": []}})
+
+    resolved_memory = {**base_memory, "file_read_authorization": {"status": "resolved", "allowed_file_ids": ["file-a"]}}
+    validate_action(read_a, spec, resolved_memory)
+    with pytest.raises(ActionValidationError, match="current user selection"):
+        validate_action(read_b, spec, resolved_memory)
+
+
 def test_recovery_state_reports_facts_without_deciding_the_next_subgoal() -> None:
     run = AgentRunState(
         run_id="run-recovery",

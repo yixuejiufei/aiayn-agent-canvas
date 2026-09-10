@@ -37,7 +37,7 @@ def _action_instructions(allow_route: bool) -> str:
         + "Do not repeat the same tool with identical arguments merely to rediscover the same result; reuse the Observation and continue to the next needed action or final_answer. "
         + "A repeated call is allowed when the task explicitly needs independent verification, a different subgoal, or a state/time-sensitive result; state that purpose in thought. "
         + "For ask_user, put the actual question in args.question. For a file picker after search_files, use args.response_schema exactly as {\"type\":\"file_selection\",\"source_observation\":\"the exact search_files tool_call_id\",\"candidate_file_ids\":[\"one to three exact observed ids\"],\"allow_custom_input\":true}. Use this schema only for a file choice and only with ids from that exact completed Observation. Without response_schema, ask_user is a plain free-text question and no file choices will be shown. "
-        + "For read_file, put the selected opaque identifier in args.file_id. The target field is reserved for workflow routing and is never a tool argument. "
+        + "For read_file, put the selected opaque identifier in args.file_id. After a file_selection interaction, only the uniquely user-confirmed file_id is readable; if the selection is ambiguous, unmatched, or cancelled, do not read another search result—ask again or return final_answer. The target field is reserved for workflow routing and is never a tool argument. "
         + "Do not explain outside JSON."
     )
 

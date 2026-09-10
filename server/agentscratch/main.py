@@ -589,6 +589,10 @@ def resume_run(
                 })
             if selection:
                 run.memory["user_file_selection"] = selection
+                run.memory["file_read_authorization"] = {
+                    "status": selection["status"],
+                    "allowed_file_ids": [selection["file_id"]] if selection["status"] == "resolved" else [],
+                }
                 if selection["status"] == "resolved":
                     selection_state = (
                         "USER_SELECTION_STATE\nstatus: resolved\n"

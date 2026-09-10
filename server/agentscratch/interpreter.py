@@ -100,6 +100,23 @@ def validate_tool_call(call: ToolCall, spec: MiniAgentSpec, memory: dict[str, An
         discovered = memory.get("discovered_file_ids", [])
         if not isinstance(discovered, list) or call.args.get("file_id") not in discovered:
             raise ActionValidationError("read_file.file_id must be returned by a successful search_files Observation")
+        # Search results are discoverable resources, not an unconditional
+        # authorization to process any result. A file-choice interaction
+        # narrows the capability to the file the user actually resolved.
+        authorization = memory.get("file_read_authorization")
+        if isinstance(authorization, dict):
+            allowed_ids = authorization.get("allowed_file_ids", [])
+            allowed = {item for item in allowed_ids if isinstance(item, str) and item}
+            requested_id = call.args.get("file_id")
+            if requested_id not in allowed:
+                selection_status = str(authorization.get("status") or "awaiting_user_selection")
+                if selection_status == "resolved":
+                    raise ActionValidationError(
+                        "read_file.file_id is not authorized by the current user selection; use the exact confirmed file_id"
+                    )
+                raise ActionValidationError(
+                    "read_file.file_id is not authorized because the user has not uniquely selected a file; ask_user or final_answer remains available"
+                )
         # This teaching workspace is a fixed read-only snapshot for one run.
         # Re-reading exactly the same file_id cannot produce new information,
         # so reject it before a second full file payload bloats Context.  This
@@ -606,6 +623,10 @@ class AgentInterpreter:
                 # choices.  The resume handler resolves only exact or unique
                 # matches and never guesses an ambiguous selection.
                 run.memory["waiting_file_catalog"] = catalog
+                run.memory["file_read_authorization"] = {
+                    "status": "awaiting_user_selection",
+                    "allowed_file_ids": [],
+                }
             else:
                 run.memory.pop("waiting_file_catalog", None)
             run.memory["last_asked_user_question"] = run.waiting_question
