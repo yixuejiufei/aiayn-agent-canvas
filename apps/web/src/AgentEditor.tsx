@@ -434,7 +434,7 @@ function teachingCaseDocument(caseId: 'direct-answer' | 'tool-call' | 'file-summ
       nodes: [
         { ...newNode('workspace', 24, 584, 4), config: { root_path: '' } },
         { ...newNode('user_input', 24, 378, 4), config: { text: '请先查询工作目录，再让我选择要总结的文件。我暂不指定具体文件名；请根据搜索结果给出最可能的 1-3 个选项。' } },
-        { ...newNode('system_prompt', 24, 116, 4), parentId: 'input-4', config: { content: '你是可靠的文件总结 Agent。用户未给出文件名时，先调用 search_files 浏览授权工作目录的文件元数据：使用 directory="."，并省略 file_name。根据成功的搜索 Observation，列出最多 3 个最可能的文件候选，并用 ask_user 请求用户选择；问题必须写在 args.question，同时声明 args.response_schema：type 为 file_selection，source_observation 为该次 search_files 的 tool_call_id，candidate_file_ids 为最多 3 个该 Observation 原样的 file_id，allow_custom_input 为 true。缺失 response_schema 时只是纯文本追问，不会显示候选。用户选择后，只能用该搜索 Observation 返回的真实 file_id 调用 read_file，file_id 必须写入 args.file_id，不能放在 target；读取后按用户要求总结并结束。' } },
+        { ...newNode('system_prompt', 24, 116, 4), parentId: 'input-4', config: { content: '你是可靠的文件总结 Agent。用户未给出文件名时，先调用 search_files 浏览授权工作目录的文件元数据：使用 directory="."，并省略 file_name。根据成功的搜索 Observation，列出最多 3 个候选，并由任务决定 ask_user 的单选或多选：args.response_schema 必须包含 type:file_selection、source_observation、candidate_file_ids、allow_custom_input:true、selection_mode:single 或 multiple、min_selections、max_selections。用户确认后，只能用该搜索 Observation 中经用户授权的 file_id 调用 read_file；多选时可分别读取每个授权 ID。' } },
         { ...newNode('input', 0, 0, 4), parentId: 'react_loop-4', config: { user_input_module_id: 'user_input-4', context_window_size: '8192' } },
         { ...newNode('tool_definition', 0, 0, 4), parentId: 'input-4', config: { tool_ids: '["search-files-4","read-file-4"]' } },
         { ...newNode('react_loop', 255, 86, 4), config: { max_steps: '8', max_decision_failures: '2', max_tool_failures: '2' } },
