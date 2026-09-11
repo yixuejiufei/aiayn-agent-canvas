@@ -442,7 +442,7 @@ function newNode(type: EditorNodeType, x: number, y: number, number: string | nu
     tool: { label: '工具模块', config: { tool: 'calculator', risk: 'read', permission: 'granted', requires_confirmation: 'false', parallel_safe: 'true' } },
     condition: { label: '条件分支', config: { source: 'last_tool_result', operator: 'greater_than', value: '0' } },
     ask_user: { label: 'Ask user', config: { question_mode: 'runtime', question: '' } },
-    final: { label: 'Final answer', config: { answer: '{{last_tool_result}}' } },
+    final: { label: '回答', config: { answer: '' } },
   };
   const definition = definitions[type];
   return {
@@ -493,7 +493,7 @@ function teachingCaseDocument(caseId: 'direct-answer' | 'tool-call' | 'file-summ
         { ...newNode('agent', 0, 0, 3), parentId: 'react_loop-3', config: { ...newNode('agent', 0, 0, 3).config, brain_type: 'test', tool_ids: '["search-files-3","read-file-3"]', prompt: '先搜索、再读取、最后总结。每一步只做完成当前子目标所需的行动。' } },
         { ...newNode('tool', 1120, 170, 3), id: 'search-files-3', label: '搜索文件', config: { tool: 'search_files', risk: 'read', permission: 'granted', requires_confirmation: 'false', parallel_safe: 'true' } },
         { ...newNode('tool', 1120, 352, 4), id: 'read-file-3', label: '读取文件', config: { tool: 'read_file', risk: 'read', permission: 'granted', requires_confirmation: 'false', parallel_safe: 'false' } },
-        { ...newNode('final', 1540, 310, 3), label: '输出总结', config: { answer: '{{last_tool_result}}' } },
+        { ...newNode('final', 1540, 310, 3), label: '回答', config: { answer: '' } },
       ],
       edges: [
         { id: 'edge-user-loop-3', from: 'user_input-3', to: 'react_loop-3', label: '注入用户消息' },
@@ -517,7 +517,7 @@ function teachingCaseDocument(caseId: 'direct-answer' | 'tool-call' | 'file-summ
         { ...newNode('tool', 1120, 152, 5), id: 'search-files-4', label: '搜索文件', config: { tool: 'search_files', risk: 'read', permission: 'granted', requires_confirmation: 'false', parallel_safe: 'true' } },
         { ...newNode('tool', 1120, 330, 6), id: 'read-file-4', label: '读取文件', config: { tool: 'read_file', risk: 'read', permission: 'granted', requires_confirmation: 'false', parallel_safe: 'false' } },
         { ...newNode('ask_user', 1120, 508, 4), label: '询问要总结的文件', config: { question_mode: 'runtime', question: '' } },
-        { ...newNode('final', 1540, 330, 4), label: '输出总结', config: { answer: '{{last_tool_result}}' } },
+        { ...newNode('final', 1540, 330, 4), label: '回答', config: { answer: '' } },
       ],
       edges: [
         { id: 'edge-user-loop-4', from: 'user_input-4', to: 'react_loop-4', label: '注入用户消息' },
@@ -580,7 +580,7 @@ function compactContent(node: EditorNode, tools: EditorNode[] = []): string {
   if (node.type === 'ask_user') return node.config.question_mode === 'runtime'
     ? '问题由 LLM 在运行时根据 Context 与 Observation 生成'
     : node.config.question || '固定问题未设置';
-  return node.config.answer || '未设置答案';
+  return node.config.answer || 'LLM 完成后在此显示回答';
 }
 
 function workflowNodeTypeLabel(type: EditorNodeType): string {
@@ -605,6 +605,15 @@ function normalizeToolReferences(document: WorkflowDocument): WorkflowDocument {
   return {
     ...document,
     nodes: document.nodes.map((node) => {
+      if (node.type === 'final') {
+        const legacyPlaceholder = node.config.answer === '{{last_tool_result}}';
+        const legacyLabel = node.label === 'Final answer' || node.label === '输出总结';
+        return {
+          ...node,
+          ...(legacyLabel ? { label: '回答' } : {}),
+          ...(legacyPlaceholder ? { config: { ...node.config, answer: '' } } : {}),
+        };
+      }
       if (node.type !== 'tool_definition' && node.type !== 'agent') return node;
       const configured = selectedModuleIds(node).filter((id) => validIds.has(id));
       // A pre-module-editor draft can retain a deleted/randomized module ID.
@@ -700,6 +709,9 @@ function ReActRuntimeDiagram({
   const selectedContextDetail = (() => {
     if (!selectedContextMessage) return '';
     if (typeof selectedContextMessage.content === 'string') return selectedContextMessage.content;
+    if (selectedContextMessage.content === null && selectedContextMessage.tool_calls?.length) {
+      return JSON.stringify({ tool_calls: selectedContextMessage.tool_calls }, null, 2);
+    }
     try {
       return JSON.stringify(selectedContextMessage.content, null, 2);
     } catch {
@@ -1014,9 +1026,6 @@ export default function AgentEditor({
     ? document.nodes.filter((node) => node.type === 'tool_definition' && node.parentId === loopContextModule.id)
     : [];
   const contextWindowTokens = Math.min(131072, Math.max(256, Number(loopContextModule?.config.context_window_size) || 8192));
-  const activeToolModule = reactPlayback.activeStages.has('invoke') && reactPlayback.activeTool
-    ? toolModules.find((node) => node.config.tool === reactPlayback.activeTool) || null
-    : null;
   const decisionFailureLimit = loopModule?.config.max_decision_failures || '2';
   const toolFailureLimit = loopModule?.config.max_tool_failures || '2';
   const visibleFailureReason = latestDemoEvent?.type === 'agent.error'
@@ -1887,10 +1896,7 @@ export default function AgentEditor({
                   ) : (
                     <div style={{ marginTop: 8, color: '#4d586a', fontSize: 12, lineHeight: 1.35, wordBreak: 'break-word' }}>
                       {node.type === 'final' && demoMode && visibleFinalOutput ? (
-                        <>
-                          <div style={{ marginBottom: 4, color: colors.label, fontWeight: 700, fontSize: 11 }}>运行结果</div>
-                          <div>{visibleFinalOutput}</div>
-                        </>
+                        <div>{visibleFinalOutput}</div>
                       ) : node.type === 'ask_user' && demoMode && waitingEvent ? (
                         <>
                           <div style={{ marginBottom: 4, color: colors.label, fontWeight: 700, fontSize: 11 }}>本轮 LLM 实际追问</div>
@@ -1959,15 +1965,6 @@ export default function AgentEditor({
                   />
                 </g>
               ))}
-              {demoMode && activeToolModule && loopModule && (
-                <g>
-                  <path
-                    d={`M ${loopModule.x + renderedNodeWidth(loopModule) - 8} ${loopModule.y + 326} C ${loopModule.x + renderedNodeWidth(loopModule) + 50} ${loopModule.y + 326}, ${activeToolModule.x - 50} ${activeToolModule.y + renderedNodeHeight(activeToolModule) / 2}, ${activeToolModule.x - 8} ${activeToolModule.y + renderedNodeHeight(activeToolModule) / 2}`}
-                    fill="none" stroke="#f0a51a" strokeWidth="3" strokeDasharray="7 5" markerEnd="url(#editor-overlay-arrow)"
-                  />
-                  <text x={(loopModule.x + renderedNodeWidth(loopModule) + activeToolModule.x) / 2} y={loopModule.y + 306} textAnchor="middle" fontSize="11" fontWeight="700" fill="#9a6200">运行时调用 → {activeToolModule.config.tool}</text>
-                </g>
-              )}
             </svg>
             {connectingFrom && (
               <div style={{ position: 'absolute', left: 12, bottom: 12, padding: '5px 8px', borderRadius: 6, background: '#172033', color: '#ffffff', fontSize: 12, zIndex: 2 }}>
