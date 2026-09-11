@@ -940,11 +940,14 @@ export default function AgentEditor({
       const id = element.dataset.contextReferenceId;
       if (!id) return;
       const rect = element.getBoundingClientRect();
+      const referenceModule = document.nodes.find((node) => node.id === id);
+      const pointsToRightSide = referenceModule?.type === 'tool_definition';
       next[id] = {
-        // Land in the reference chip's upper-left inset, leaving its label
-        // readable while still making the object identity explicit.
-        x: (rect.left - canvasRect.left + 7) / canvasZoom,
-        y: (rect.top - canvasRect.top + 7) / canvasZoom,
+        // System/User modules enter their chips from the left; the tool
+        // definition lives to the right of Context and points to that chip's
+        // right middle edge.
+        x: ((pointsToRightSide ? rect.right - 3 : rect.left + 3) - canvasRect.left) / canvasZoom,
+        y: (rect.top - canvasRect.top + rect.height / 2) / canvasZoom,
       };
     });
     setContextReferenceAnchors((current) => JSON.stringify(current) === JSON.stringify(next) ? current : next);
@@ -1854,7 +1857,7 @@ export default function AgentEditor({
                       demoMode={demoMode}
                       onSelectContext={!demoMode && reactContextModule ? () => setSelectedNodeId(reactContextModule.id) : undefined}
                       onSelectLLM={!demoMode && reactLLMModule ? () => setSelectedNodeId(reactLLMModule.id) : undefined}
-                      embeddedModules={contextChildren.filter((child) => child.type !== 'system_prompt')}
+                      embeddedModules={contextChildren.filter((child) => child.type !== 'system_prompt' && child.type !== 'tool_definition')}
                       onSelectModule={!demoMode ? (nodeId) => setSelectedNodeId(nodeId) : undefined}
                       userInputModule={contextUserInputModule}
                       systemPromptModules={contextSystemPromptModules}
@@ -1897,7 +1900,6 @@ export default function AgentEditor({
                       )}
                     </div>
                   )}
-                  <div style={{ marginTop: 10, color: '#697386', fontSize: 11 }}>{workflowNodeTypeLabel(node.type)}</div>
                 </div>
               );
             })}
