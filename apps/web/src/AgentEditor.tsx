@@ -297,11 +297,13 @@ function replayReActContext(events: DemoEvent[], pendingPhase?: 'context' | 'llm
       activeStages.add('observation');
     } else if (latest.type === 'context.append') {
       activeStages.add('context');
+      // Every append is the write-back/assembly moment.  Assistant actions
+      // also retain their decision and validation provenance, but must not
+      // make the visible "拼装" stage disappear on the final decision.
+      activeStages.add('assemble');
       if (latest.data.source === 'assistant_action') {
         activeStages.add('action');
         activeStages.add('validation');
-      } else {
-        activeStages.add('assemble');
       }
     } else if (latest.type === 'tool.rejected' || latest.type === 'llm.error') {
       activeStages.add('validation');
