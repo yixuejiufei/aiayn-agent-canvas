@@ -290,7 +290,6 @@ function replayReActContext(events: DemoEvent[], pendingPhase?: 'context' | 'llm
       activeStages.add('action');
       activeStages.add('validation');
     } else if (latest.type === 'tool.start') {
-      activeStages.add('validation');
       activeStages.add('invoke');
     } else if (latest.type === 'tool.end' || latest.type === 'tool.error') {
       activeStages.add('invoke');
@@ -299,7 +298,7 @@ function replayReActContext(events: DemoEvent[], pendingPhase?: 'context' | 'llm
       activeStages.add('context');
       // Every append is the write-back/assembly moment.  Assistant actions
       // also retain their decision and validation provenance, but must not
-      // make the visible "拼装" stage disappear on the final decision.
+      // make the visible "写回上下文" stage disappear on the final decision.
       activeStages.add('assemble');
       if (latest.data.source === 'assistant_action') {
         activeStages.add('action');
@@ -677,18 +676,14 @@ function ReActRuntimeDiagram({
           {arrow(isActive('action') || isActive('validation'))}
           <ReActStageCard label="校验" detail="约束、权限等" active={isActive('validation')} tone="#fff5e5" />
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', margin: '4px 0 2px', fontWeight: 800, fontSize: 13 }}>
-          <span style={{ color: isActive('validation') || isActive('assemble') ? '#dc8b00' : '#9a6fd1' }}>校验失败 ↙ 拼装</span>
-          <span style={{ color: isActive('validation') || isActive('invoke') ? '#dc8b00' : '#9a6fd1', fontSize: 16, textAlign: 'right', paddingRight: '9%' }}>↓ 校验通过</span>
-        </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'minmax(76px, 1fr) 18px minmax(76px, 1fr) 18px minmax(76px, 1fr)', alignItems: 'stretch', gap: 3 }}>
-          <ReActStageCard label="拼装" detail="执行结果写回上下文" active={isActive('assemble')} tone="#eef5ff" />
+          <ReActStageCard label="写回上下文" detail="执行结果写回上下文" active={isActive('assemble')} tone="#eef5ff" />
           {leftArrow(isActive('observation') || isActive('assemble'))}
           <ReActStageCard label="观察" detail="工具执行结果" active={isActive('observation')} tone="#fff5e5" />
           {leftArrow(isActive('invoke') || isActive('observation'))}
           <ReActStageCard label="调用" detail={playback.activeTool ? `目标：${playback.activeTool}` : '等待有效工具计划'} active={isActive('invoke')} tone="#fff5e5" />
         </div>
-        <div aria-label="拼装结果写回上下文" style={{ marginTop: 7, color: isActive('assemble') || isActive('context') ? '#dc8b00' : '#5877ae', fontSize: 16, fontWeight: 800, textAlign: 'left' }}>
+        <div aria-label="写回上下文" style={{ marginTop: 7, color: isActive('assemble') || isActive('context') ? '#dc8b00' : '#5877ae', fontSize: 16, fontWeight: 800, textAlign: 'left' }}>
           ←
         </div>
       </div>
