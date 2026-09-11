@@ -27,6 +27,8 @@ export interface EditorNode {
   label: string;
   x: number;
   y: number;
+  width?: number;
+  height?: number;
   parentId?: string | null;
   config: Record<string, string>;
 }
@@ -201,11 +203,17 @@ function runStatusPresentation(status?: string): { label: string; background: st
 }
 
 function renderedNodeWidth(node: EditorNode): number {
-  return node.type === 'input' ? 380 : node.type === 'react_loop' ? 760 : NODE_WIDTH;
+  const fallback = node.type === 'input' ? 380 : node.type === 'react_loop' ? 760 : NODE_WIDTH;
+  const minimum = node.type === 'input' ? 320 : node.type === 'react_loop' ? 620 : 130;
+  const configured = Number(node.width);
+  return Number.isFinite(configured) ? Math.min(1600, Math.max(minimum, Math.round(configured))) : fallback;
 }
 
 function renderedNodeHeight(node: EditorNode): number {
-  return node.type === 'input' ? 268 : node.type === 'react_loop' ? 490 : NODE_HEIGHT;
+  const fallback = node.type === 'input' ? 268 : node.type === 'react_loop' ? 490 : NODE_HEIGHT;
+  const minimum = node.type === 'input' ? 240 : node.type === 'react_loop' ? 450 : 88;
+  const configured = Number(node.height);
+  return Number.isFinite(configured) ? Math.min(1200, Math.max(minimum, Math.round(configured))) : fallback;
 }
 
 function actionFromEvent(event: DemoEvent | null): Record<string, unknown> | null {
@@ -745,7 +753,7 @@ function ReActRuntimeDiagram({
       <div style={{ minWidth: 0, padding: 10, border: '1px dashed #b89ade', borderRadius: 9, background: '#fcfaff' }}>
         <div style={{ color: '#68429b', fontSize: 11, fontWeight: 700, marginBottom: 8 }}>本轮执行路径 · {demoMode ? playback.actionLabel : '运行时按真实事件高亮'}</div>
         <div style={{ display: 'grid', gridTemplateColumns: 'minmax(72px, 1fr) 18px minmax(72px, 1fr) 18px minmax(72px, 1fr)', alignItems: 'stretch', gap: 3 }}>
-          <ReActStageCard label="LLM 推理" detail="生成下一次行动计划" active={isActive('llm')} tone="#eaf8f1" onSelect={onSelectLLM} />
+          <ReActStageCard label="LLM" detail="生成下一次行动计划" active={isActive('llm')} tone="#eaf8f1" onSelect={onSelectLLM} />
           {arrow(isActive('llm') || isActive('action'))}
           <ReActStageCard label="行动计划" detail="工具 / 回答 / 追问" active={isActive('action')} />
           {arrow(isActive('action') || isActive('validation'))}
@@ -757,9 +765,6 @@ function ReActRuntimeDiagram({
           <ReActStageCard label="观察" detail="工具执行结果" active={isActive('observation')} tone="#fff5e5" />
           {leftArrow(isActive('invoke') || isActive('observation'))}
           <ReActStageCard label="调用" detail={playback.activeTool ? `目标：${playback.activeTool}` : '等待有效工具计划'} active={isActive('invoke')} tone="#fff5e5" />
-        </div>
-        <div aria-label="写回上下文" style={{ marginTop: 7, color: isActive('assemble') || isActive('context') ? '#dc8b00' : '#5877ae', fontSize: 16, fontWeight: 800, textAlign: 'left' }}>
-          ←
         </div>
       </div>
     </div>
@@ -1974,6 +1979,31 @@ export default function AgentEditor({
                 节点名称
                 <input value={selectedNode.label} onChange={(event) => updateSelected({ label: event.target.value })} style={{ ...inputStyle, marginTop: 4 }} />
               </label>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                <label style={{ fontSize: 12, color: '#4d586a' }}>
+                  模块宽度
+                  <input
+                    type="number"
+                    min={selectedNode.type === 'input' ? 320 : selectedNode.type === 'react_loop' ? 620 : 130}
+                    max="1600"
+                    value={renderedNodeWidth(selectedNode)}
+                    onChange={(event) => updateSelected({ width: Number(event.target.value) || renderedNodeWidth(selectedNode) })}
+                    style={{ ...inputStyle, marginTop: 4 }}
+                  />
+                </label>
+                <label style={{ fontSize: 12, color: '#4d586a' }}>
+                  模块高度
+                  <input
+                    type="number"
+                    min={selectedNode.type === 'input' ? 240 : selectedNode.type === 'react_loop' ? 450 : 88}
+                    max="1200"
+                    value={renderedNodeHeight(selectedNode)}
+                    onChange={(event) => updateSelected({ height: Number(event.target.value) || renderedNodeHeight(selectedNode) })}
+                    style={{ ...inputStyle, marginTop: 4 }}
+                  />
+                </label>
+              </div>
+              <div style={{ marginTop: -4, color: '#697386', fontSize: 11 }}>尺寸会与模块位置一同自动保存到本地浏览器。</div>
               {selectedNode.type === 'workspace' && (
                 <>
                   <div style={{ display: 'grid', gap: 7 }}>
