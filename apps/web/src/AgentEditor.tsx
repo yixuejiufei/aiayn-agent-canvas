@@ -224,6 +224,51 @@ function actionToolName(action: Record<string, unknown> | null): string | null {
   return null;
 }
 
+function actionToolNames(action: Record<string, unknown> | null): string[] {
+  if (!action) return [];
+  if (typeof action.tool === 'string' && action.tool) return [action.tool];
+  if (Array.isArray(action.tool_calls)) {
+    return action.tool_calls.flatMap((call) => {
+      const tool = call && typeof call === 'object' ? (call as Record<string, unknown>).tool : null;
+      return typeof tool === 'string' && tool ? [tool] : [];
+    });
+  }
+  return [];
+}
+
+function describeModelActionPlan(action: Record<string, unknown> | null): string {
+  const tools = actionToolNames(action);
+  if (tools.length) return `模型生成行动计划：调用工具 ${tools.join('、')}`;
+  switch (action?.action) {
+    case 'final_answer': return '模型生成行动计划：直接回答';
+    case 'ask_user': return '模型生成行动计划：向用户追问';
+    case 'route': return '模型生成行动计划：交给下一个模型';
+    default: return '模型已生成行动计划';
+  }
+}
+
+function describeDemoPhase(event: DemoEvent): string {
+  if (event.type === 'llm.end') return describeModelActionPlan(actionFromEvent(event));
+  if (event.type === 'tool.start') return event.node ? `正在调用工具：${event.node}` : '正在调用工具';
+  if (event.type === 'tool.end') return '工具已返回执行结果';
+  if (event.type === 'context.append') {
+    if (event.data.source === 'observation') return '正在将工具执行结果写回上下文';
+    if (event.data.source === 'assistant_action') return '正在将行动计划写回上下文';
+    return '正在将运行反馈写回上下文';
+  }
+  return ({
+    'run.start': '正在准备用户输入',
+    'context.build': '正在组装上下文',
+    'context.request': '上下文已送入模型',
+    'llm.start': '模型正在推理',
+    'action.validate': '正在校验行动计划',
+    'tool.rejected': '工具调用未获允许',
+    'llm.error': '模型生成的行动计划未通过校验',
+    'agent.waiting_user': '正在等待用户补充信息',
+    'agent.finish': '已输出最终答案',
+  } as Record<string, string>)[event.type] || '正在处理运行状态';
+}
+
 function contextMessageText(message: ContextGrowthMessage): string {
   if (typeof message.content === 'string') return message.content;
   if (message.content !== null && message.content !== undefined) {
@@ -245,6 +290,7 @@ function estimatedMessageTokens(message: ContextGrowthMessage): number {
 
 function contextMessageLabel(message: ContextGrowthMessage): string {
   if (message.role === 'tool') return `观察 · ${message.name || 'tool'}`;
+  if (message.role === 'tool_definition') return `工具定义 · ${message.name || '工具'}`;
   if (message.role === 'assistant') return message.tool_calls?.length ? 'Assistant · tool_calls' : 'Assistant';
   if (message.role === 'system') return 'System';
   return message.role === 'user' ? 'User' : message.role;
@@ -258,7 +304,20 @@ function replayReActContext(events: DemoEvent[], pendingPhase?: 'context' | 'llm
     ? snapshot?.data.messages.filter((message): message is ContextGrowthMessage => Boolean(message) && typeof message === 'object')
     : [];
   const initialMessageCount = Array.isArray(firstSnapshot?.data.messages) ? firstSnapshot.data.messages.length : snapshotMessages.length;
-  const messages = [...snapshotMessages];
+  const requestSnapshot = [...events].reverse().find((event) => event.type === 'context.request');
+  const requestTools = Array.isArray(requestSnapshot?.data.tools) ? requestSnapshot.data.tools : [];
+  const toolDefinitions = requestTools.flatMap((tool) => {
+    if (!tool || typeof tool !== 'object') return [];
+    const definition = tool as Record<string, unknown>;
+    const name = typeof definition.name === 'string' ? definition.name : '工具';
+    return [{ role: 'tool_definition', name, content: definition } satisfies ContextGrowthMessage];
+  });
+  // Tool schemas are part of every model request, but not conversation
+  // messages.  Place them after the authored System/User messages, then keep
+  // subsequent observations and actions green as growing runtime Context.
+  const baseMessages = snapshotMessages.slice(0, initialMessageCount);
+  const messages = [...baseMessages, ...toolDefinitions, ...snapshotMessages.slice(initialMessageCount)];
+  const initialMessageCountWithTools = baseMessages.length + toolDefinitions.length;
   if (lastSnapshotIndex >= 0) {
     events.slice(lastSnapshotIndex + 1).forEach((event) => {
       if (event.type !== 'context.append') return;
@@ -319,7 +378,7 @@ function replayReActContext(events: DemoEvent[], pendingPhase?: 'context' | 'llm
   } else if (latest?.type === 'tool.start') actionLabel = `调用 ${latest.node}`;
   else if (latest?.type === 'tool.end') actionLabel = `${latest.node} 返回结果`;
   else if (latest?.type === 'llm.error') actionLabel = '模型输出未通过解析/校验';
-  return { messages, initialMessageCount, activeStages, activeTool: toolFromLatest || null, actionLabel };
+  return { messages, initialMessageCount: initialMessageCountWithTools, activeStages, activeTool: toolFromLatest || null, actionLabel };
 }
 
 const palette: PaletteItem[] = [
@@ -628,7 +687,7 @@ function ReActRuntimeDiagram({
           <strong style={{ color: '#245f95', fontSize: 12 }}>上下文</strong>
           <span style={{ color: '#5b6475', fontSize: 10 }}>约 {estimatedTokens} / {contextWindowTokens} tokens · {usedPercent.toFixed(1)}%</span>
         </div>
-        {(userInputModule || systemPromptModules.length > 0) && (
+        {!demoMode && (userInputModule || systemPromptModules.length > 0) && (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 5, margin: '5px 0 8px' }}>
             {userInputModule && <button data-context-reference-id={userInputModule.id} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onSelectModule?.(userInputModule.id); }} style={{ padding: '5px 6px', border: '1px solid #6ca9df', borderRadius: 5, background: '#f0f8ff', color: '#245f95', fontSize: 10, cursor: onSelectModule ? 'pointer' : 'default', textAlign: 'left' }}>用户输入 ↗ {userInputModule.label}</button>}
             {systemPromptModules.map((module) => <button key={module.id} data-context-reference-id={module.id} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onSelectModule?.(module.id); }} style={{ padding: '5px 6px', border: '1px solid #759ad8', borderRadius: 5, background: '#eef5ff', color: '#315e9e', fontSize: 10, cursor: onSelectModule ? 'pointer' : 'default', textAlign: 'left' }}>系统提示词 ↗ {module.label}</button>)}
@@ -647,14 +706,15 @@ function ReActRuntimeDiagram({
           <div style={{ display: 'flex', width: `${usedRatio * 100}%`, minWidth: playback.messages.length ? 2 : 0, height: 30, overflow: 'hidden' }}>
             {playback.messages.map((message, index) => {
               const grown = index >= playback.initialMessageCount;
-              return <div key={`${message.role}-${index}`} title={`${contextMessageLabel(message)}\n${contextMessageText(message)}`} style={{ flex: `${estimatedMessageTokens(message)} 1 0`, minWidth: 1, background: grown ? '#7ed69d' : '#73b5ef' }} />;
+              const toolDefinition = message.role === 'tool_definition';
+              return <div key={`${message.role}-${index}`} title={`${contextMessageLabel(message)}\n${contextMessageText(message)}`} style={{ flex: `${estimatedMessageTokens(message)} 1 0`, minWidth: 1, background: grown ? '#7ed69d' : toolDefinition ? '#f2c14f' : '#73b5ef' }} />;
             })}
           </div>
           {estimatedTokens > contextWindowTokens && <div style={{ position: 'absolute', right: 5, top: 5, padding: '2px 5px', borderRadius: 4, background: '#fff0ee', color: '#a33a2b', fontSize: 9, fontWeight: 700 }}>超过窗口</div>}
         </div>
         <div onPointerDown={(event) => event.stopPropagation()} style={{ marginTop: 8, display: 'grid', gap: 5, maxHeight: 236, overflowY: 'auto', overscrollBehavior: 'contain', touchAction: 'pan-y', paddingRight: 3 }}>
           {initialMessages.map((message, index) => (
-            <div key={`initial-${index}`} style={{ padding: '5px 6px', borderRadius: 5, background: '#e8f2ff', color: '#315e9e', fontSize: 10 }}>
+            <div key={`initial-${index}`} style={{ padding: '5px 6px', borderRadius: 5, background: message.role === 'tool_definition' ? '#fff3cf' : '#e8f2ff', color: message.role === 'tool_definition' ? '#805300' : '#315e9e', fontSize: 10 }}>
               {contextMessageLabel(message)} · {contextMessageText(message).slice(0, 72) || '（结构化工具调用）'}
             </div>
           ))}
@@ -935,11 +995,11 @@ export default function AgentEditor({
     return null;
   })();
   const demoPhase = demoPendingPhase === 'llm'
-    ? 'LLM 正在真实推理'
+    ? '模型正在推理'
     : demoPendingPhase === 'context'
       ? '正在组装并发送上下文'
       : latestDemoEvent
-    ? ({ 'run.start': '用户输入准备注入', 'context.build': '正在组装上下文', 'context.request': '上下文已送入模型', 'llm.start': 'LLM 正在思考', 'llm.end': '模型已选择下一步', 'tool.start': '正在调用工具', 'tool.end': '观察写回上下文', 'agent.waiting_user': '等待用户补充', 'agent.finish': '输出最终答案' } as Record<string, string>)[latestDemoEvent.type] || latestDemoEvent.type
+    ? describeDemoPhase(latestDemoEvent)
     : '等待运行开始';
   const canvasVisibleNodes = document.nodes.filter((node) => !node.parentId || node.type === 'system_prompt');
   const canvasWidth = Math.max(1000, canvasViewportWidth, ...canvasVisibleNodes.map((node) => node.x + renderedNodeWidth(node) + 40));
