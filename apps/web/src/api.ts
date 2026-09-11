@@ -198,8 +198,16 @@ export async function getLocalModels(): Promise<LocalModelsResponse> {
   return request<LocalModelsResponse>('/local-models');
 }
 
-export async function selectTeachingWorkspaceDirectory(): Promise<TeachingWorkspaceSelection> {
-  return request<TeachingWorkspaceSelection>('/teaching-workspace/select-directory', { method: 'POST' });
+export async function importTeachingWorkspaceDirectory(files: File[], sourceName: string): Promise<TeachingWorkspaceSelection> {
+  const form = new FormData();
+  form.append('source_name', sourceName);
+  for (const file of files) {
+    // Preserve the path below the selected folder. The browser never exposes
+    // an absolute local path, which is intentional.
+    const relativePath = file.webkitRelativePath || file.name;
+    form.append('files', file, relativePath);
+  }
+  return request<TeachingWorkspaceSelection>('/teaching-workspace/import-directory', { method: 'POST', body: form });
 }
 
 export async function getTeachingWorkspaceTree(rootPath: string): Promise<TeachingWorkspaceTree> {

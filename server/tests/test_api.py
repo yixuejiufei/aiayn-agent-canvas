@@ -1,4 +1,5 @@
 import time
+from pathlib import Path
 from threading import Event
 
 import pytest
@@ -24,6 +25,26 @@ def test_teaching_workspace_tree_endpoint(tmp_path) -> None:
     assert tree["root_path"] == str(tmp_path.resolve())
     assert tree["entries"][0]["name"] == "notes.txt"
     assert tree["entries"][0]["readable"] is True
+
+
+def test_browser_directory_import_creates_a_safe_teaching_workspace(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("AIAYN_TEACHING_WORKSPACE_IMPORT_DIR", str(tmp_path / "imports"))
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/teaching-workspace/import-directory",
+        data={"source_name": "lesson-files"},
+        files=[
+            ("files", ("lesson-files/overview.txt", b"teaching workspace content", "text/plain")),
+            ("files", ("lesson-files/notes/detail.md", b"nested content", "text/markdown")),
+        ],
+    )
+    assert response.status_code == 200
+    workspace = response.json()
+    root = tmp_path / "imports"
+    assert workspace["selected"] is True
+    assert workspace["root_path"].startswith(str(root.resolve()))
+    assert (Path(workspace["root_path"]) / "overview.txt").read_text(encoding="utf-8") == "teaching workspace content"
+    assert (Path(workspace["root_path"]) / "notes" / "detail.md").read_text(encoding="utf-8") == "nested content"
 
 
 def test_agent_loop_with_calculator() -> None:

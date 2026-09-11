@@ -1,5 +1,6 @@
 import {
   type CSSProperties,
+  type ChangeEvent,
   type DragEvent as ReactDragEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
@@ -12,7 +13,7 @@ import {
 } from 'react';
 import {
   getTeachingWorkspaceTree,
-  selectTeachingWorkspaceDirectory,
+  importTeachingWorkspaceDirectory,
   type LocalExecutionDevice,
   type LocalModelProfile,
   type TeachingWorkspaceTree,
@@ -870,6 +871,7 @@ export default function AgentEditor({
   const [workspaceTree, setWorkspaceTree] = useState<TeachingWorkspaceTree | null>(null);
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
+  const workspaceDirectoryInputRef = useRef<HTMLInputElement | null>(null);
   const [runtimeClockMs, setRuntimeClockMs] = useState(() => Date.now());
   const [waitingInput, setWaitingInput] = useState('');
   const [waitingSelectionIds, setWaitingSelectionIds] = useState<string[]>([]);
@@ -880,6 +882,15 @@ export default function AgentEditor({
     documentRef.current = document;
     persistDocument(document);
   }, [document]);
+
+  useEffect(() => {
+    // React's type definitions do not consistently expose these Chromium
+    // attributes. This lets the browser, rather than the backend process,
+    // open the platform folder chooser.
+    const picker = workspaceDirectoryInputRef.current;
+    picker?.setAttribute('webkitdirectory', '');
+    picker?.setAttribute('directory', '');
+  }, []);
 
   useEffect(() => {
     // `pagehide` also covers a quick F5 immediately after dropping a module.
@@ -1086,18 +1097,33 @@ export default function AgentEditor({
     }
   }
 
-  async function chooseWorkspaceDirectory() {
+  function chooseWorkspaceDirectory() {
+    if (workspaceLoading) return;
+    const picker = workspaceDirectoryInputRef.current;
+    if (!picker) {
+      setWorkspaceError('浏览器目录选择器尚未准备好，请刷新页面后重试');
+      return;
+    }
+    picker.value = '';
+    picker.click();
+  }
+
+  async function importWorkspaceDirectory(event: ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.target.files || []);
+    event.target.value = '';
+    if (!files.length) {
+      setStatus('未选择文件夹，教学工作区保持不变');
+      return;
+    }
     setWorkspaceLoading(true);
     setWorkspaceError(null);
     try {
-      const selection = await selectTeachingWorkspaceDirectory();
-      if (!selection.selected) {
-        setStatus('未选择文件夹，教学工作区保持不变');
-        return;
-      }
+      const relativePath = files[0]?.webkitRelativePath || '';
+      const sourceName = relativePath.split('/').filter(Boolean)[0] || 'teaching-workspace';
+      const selection = await importTeachingWorkspaceDirectory(files, sourceName);
       updateConfig('root_path', selection.root_path);
       setWorkspaceTree(selection.tree);
-      setStatus(`教学工作区已授权：${selection.root_path}`);
+      setStatus(`教学工作区已导入并授权：${sourceName}`);
     } catch (reason) {
       const message = reason instanceof Error ? reason.message : String(reason);
       setWorkspaceError(message);
@@ -1449,6 +1475,15 @@ export default function AgentEditor({
 
   return (
     <section style={{ position: 'fixed', inset: 0, overflow: 'hidden', background: '#fbfcff' }}>
+      <input
+        ref={workspaceDirectoryInputRef}
+        type="file"
+        multiple
+        tabIndex={-1}
+        aria-hidden="true"
+        onChange={(event) => void importWorkspaceDirectory(event)}
+        style={{ display: 'none' }}
+      />
       <nav
         aria-label="AgentScratch 工作台导航"
         onMouseEnter={() => setNavigationOpen(true)}
@@ -2019,9 +2054,10 @@ export default function AgentEditor({
               {selectedNode.type === 'workspace' && (
                 <>
                   <div style={{ display: 'grid', gap: 7 }}>
-                    <button onClick={() => void chooseWorkspaceDirectory()} disabled={workspaceLoading} style={{ border: '1px solid #78a764', borderRadius: 7, padding: '8px 10px', background: workspaceLoading ? '#edf3ea' : '#f1f8ee', color: '#356c2a', cursor: workspaceLoading ? 'wait' : 'pointer', fontWeight: 700 }}>
-                      {workspaceLoading ? '正在打开或读取文件夹…' : selectedNode.config.root_path ? '重新选择文件夹' : '选择教学工作区文件夹'}
+                    <button onClick={chooseWorkspaceDirectory} disabled={workspaceLoading} style={{ border: '1px solid #78a764', borderRadius: 7, padding: '8px 10px', background: workspaceLoading ? '#edf3ea' : '#f1f8ee', color: '#356c2a', cursor: workspaceLoading ? 'wait' : 'pointer', fontWeight: 700 }}>
+                      {workspaceLoading ? '正在导入文件夹…' : selectedNode.config.root_path ? '重新选择并导入文件夹' : '选择教学工作区文件夹'}
                     </button>
+                    <div style={{ color: '#697386', fontSize: 11, lineHeight: 1.45 }}>浏览器会打开 Windows 文件夹选择窗口；所选文件将作为教学工作区快照导入本机应用数据。</div>
                     {selectedNode.config.root_path ? (
                       <div style={{ padding: '7px 8px', border: '1px solid #c9dcc1', borderRadius: 6, background: '#f7fbf5', color: '#356c2a', fontSize: 12, wordBreak: 'break-all' }}>
                         已授权根目录：{selectedNode.config.root_path}
