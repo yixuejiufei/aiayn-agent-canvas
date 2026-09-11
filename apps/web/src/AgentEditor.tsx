@@ -1039,9 +1039,9 @@ export default function AgentEditor({
   const contextWindowTokens = Math.min(131072, Math.max(256, Number(loopContextModule?.config.context_window_size) || 8192));
   const decisionFailureLimit = loopModule?.config.max_decision_failures || '2';
   const toolFailureLimit = loopModule?.config.max_tool_failures || '2';
-  const visibleFailureReason = latestDemoEvent?.type === 'agent.error'
-    ? String(latestDemoEvent.data.error || demoError || '')
-    : demoRunStatus === 'failed' ? demoError || '' : '';
+  const visibleFailureReason = demoError || (latestDemoEvent?.type === 'agent.error'
+    ? String(latestDemoEvent.data.error || '')
+    : '');
   const waitingEvent = [...displayedDemoEvents].reverse().find((event) => event.type === 'agent.waiting_user');
   const visibleWaitingQuestion = waitingQuestion || (typeof waitingEvent?.data.question === 'string' ? waitingEvent.data.question : '请补充 Agent 所需的信息。');
   const allowsCustomWaitingInput = waitingResponseSchema?.type !== 'file_selection' || waitingResponseSchema.allow_custom_input;

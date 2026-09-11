@@ -47,6 +47,33 @@ def test_browser_directory_import_creates_a_safe_teaching_workspace(tmp_path, mo
     assert (Path(workspace["root_path"]) / "notes" / "detail.md").read_text(encoding="utf-8") == "nested content"
 
 
+def test_workflow_run_accepts_an_imported_teaching_workspace(tmp_path) -> None:
+    (tmp_path / "report.txt").write_text("workspace report", encoding="utf-8")
+    workflow = {
+        "version": "0.1",
+        "name": "workspace workflow",
+        "max_steps": 4,
+        "nodes": [
+            {"id": "workspace", "type": "workspace", "label": "教学工作区", "x": 0, "y": 0, "config": {"root_path": str(tmp_path)}},
+            {"id": "context", "type": "input", "label": "上下文", "x": 0, "y": 0, "config": {"user_input_module_id": "user", "context_window_size": "8192"}},
+            {"id": "user", "type": "user_input", "label": "用户输入", "x": 0, "y": 0, "parentId": "context", "config": {"text": "概括工作区中的报告"}},
+            {"id": "definitions", "type": "tool_definition", "label": "工具定义", "x": 0, "y": 0, "parentId": "context", "config": {"tool_ids": "[\"search\", \"read\"]"}},
+            {"id": "search", "type": "tool", "label": "搜索文件", "x": 0, "y": 0, "config": {"tool": "search_files"}},
+            {"id": "read", "type": "tool", "label": "读取文件", "x": 0, "y": 0, "config": {"tool": "read_file"}},
+            {"id": "loop", "type": "react_loop", "label": "ReAct 循环", "x": 0, "y": 0, "config": {"max_steps": "4"}},
+            {"id": "agent", "type": "agent", "label": "LLM", "x": 0, "y": 0, "parentId": "loop", "config": {"brain_type": "test", "tool_ids": "[\"search\", \"read\"]"}},
+        ],
+        "edges": [
+            {"id": "entry", "from": "context", "to": "loop"},
+            {"id": "agent-entry", "from": "loop", "to": "agent"},
+        ],
+    }
+    response = TestClient(app).post("/api/v1/workflows/runs", json={"workflow": workflow})
+    assert response.status_code == 201, response.text
+    context = response.json()["run"]["context"]
+    assert any(message["content"].startswith("TEACHING_WORKSPACE_INDEX=") for message in context)
+
+
 def test_agent_loop_with_calculator() -> None:
     client = TestClient(app)
     agent = client.post(

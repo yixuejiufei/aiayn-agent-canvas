@@ -793,6 +793,8 @@ export default function App() {
     setBusy(true);
     setEditorDemoMode(true);
     setError('');
+    setRun(null);
+    setEvents([]);
     setReplayText('');
     setResumeInput('');
     setReplayCursor(null);
@@ -1006,9 +1008,9 @@ export default function App() {
         disabled={busy}
         demoMode={editorDemoMode}
         demoEvents={events}
-        demoRunStatus={run?.status === 'created' && events.length > 0 ? 'running' : run?.status}
+        demoRunStatus={error ? 'failed' : run?.status === 'created' && events.length > 0 ? 'running' : run?.status}
         demoRunId={run?.run_id}
-        demoError={run?.error}
+        demoError={error || run?.error}
         demoPendingPhase={editorPendingPhase}
         demoOutput={run?.output}
         waitingQuestion={run?.status === 'waiting_user' ? run.waiting_question : null}
