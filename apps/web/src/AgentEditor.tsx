@@ -689,12 +689,23 @@ function ReActRuntimeDiagram({
   toolDefinitionModules?: EditorNode[];
   contextWindowTokens?: number;
 }) {
+  const [selectedContextMessageIndex, setSelectedContextMessageIndex] = useState<number | null>(null);
   const initialMessages = playback.messages.slice(0, playback.initialMessageCount);
   const grownMessages = playback.messages.slice(playback.initialMessageCount);
   const estimatedTokens = playback.messages.reduce((total, message) => total + estimatedMessageTokens(message), 0);
   const grownTokens = grownMessages.reduce((total, message) => total + estimatedMessageTokens(message), 0);
   const usedRatio = Math.min(1, estimatedTokens / contextWindowTokens);
   const usedPercent = Math.min(999, (estimatedTokens / contextWindowTokens) * 100);
+  const selectedContextMessage = selectedContextMessageIndex === null ? null : playback.messages[selectedContextMessageIndex] || null;
+  const selectedContextDetail = (() => {
+    if (!selectedContextMessage) return '';
+    if (typeof selectedContextMessage.content === 'string') return selectedContextMessage.content;
+    try {
+      return JSON.stringify(selectedContextMessage.content, null, 2);
+    } catch {
+      return contextMessageText(selectedContextMessage);
+    }
+  })();
   const isActive = (stage: ReactStage) => playback.activeStages.has(stage);
   const arrow = (active: boolean, label?: string) => (
     <span style={{ color: active ? '#dc8b00' : '#9a6fd1', fontWeight: 800, fontSize: 17, lineHeight: 1, alignSelf: 'center' }} title={label}>→</span>
@@ -735,22 +746,23 @@ function ReActRuntimeDiagram({
           </div>
           {estimatedTokens > contextWindowTokens && <div style={{ position: 'absolute', right: 5, top: 5, padding: '2px 5px', borderRadius: 4, background: '#fff0ee', color: '#a33a2b', fontSize: 9, fontWeight: 700 }}>超过窗口</div>}
         </div>
-        <div onPointerDown={(event) => event.stopPropagation()} style={{ marginTop: 8, display: 'grid', gap: 5, maxHeight: 236, overflowY: 'auto', overscrollBehavior: 'contain', touchAction: 'pan-y', paddingRight: 3 }}>
+        <div onPointerDown={(event) => event.stopPropagation()} style={{ marginTop: 8, display: 'grid', gap: 5, height: demoMode ? 278 : 236, overflowY: 'auto', overscrollBehavior: 'contain', touchAction: 'pan-y', paddingRight: 3 }}>
           {initialMessages.map((message, index) => (
-            <div key={`initial-${index}`} style={{ padding: '5px 6px', borderRadius: 5, background: message.role === 'tool_definition' ? '#fff3cf' : '#e8f2ff', color: message.role === 'tool_definition' ? '#805300' : '#315e9e', fontSize: 10 }}>
+            <button key={`initial-${index}`} onClick={(event) => { event.stopPropagation(); setSelectedContextMessageIndex(index); }} style={{ padding: '5px 6px', border: selectedContextMessageIndex === index ? '2px solid #f0a51a' : '1px solid transparent', borderRadius: 5, background: message.role === 'tool_definition' ? '#fff3cf' : '#e8f2ff', color: message.role === 'tool_definition' ? '#805300' : '#315e9e', fontSize: 10, textAlign: 'left', cursor: 'pointer' }}>
               {contextMessageLabel(message)} · {contextMessageText(message).slice(0, 72) || '（结构化工具调用）'}
-            </div>
+            </button>
           ))}
           {grownMessages.length > 0 && <div style={{ marginTop: 2, padding: '4px 6px', borderTop: '1px dashed #65ba87', color: '#176b43', fontSize: 10, fontWeight: 700 }}>运行中新增 · {grownMessages.length} 条 / 约 {grownTokens} tokens</div>}
           {grownMessages.map((message, index) => (
-            <div key={`grown-${index}`} style={{ padding: '5px 6px', borderRadius: 5, background: '#e8f7ee', color: '#176b43', fontSize: 10 }}>
+            <button key={`grown-${index}`} onClick={(event) => { event.stopPropagation(); setSelectedContextMessageIndex(playback.initialMessageCount + index); }} style={{ padding: '5px 6px', border: selectedContextMessageIndex === playback.initialMessageCount + index ? '2px solid #f0a51a' : '1px solid transparent', borderRadius: 5, background: '#e8f7ee', color: '#176b43', fontSize: 10, textAlign: 'left', cursor: 'pointer' }}>
               + {contextMessageLabel(message)} · {contextMessageText(message).slice(0, 72) || '（结构化工具调用）'}
-            </div>
+            </button>
           ))}
         </div>
       </div>
 
-      <div style={{ minWidth: 0, padding: 10, border: '1px dashed #b89ade', borderRadius: 9, background: '#fcfaff' }}>
+      <div style={{ minWidth: 0, minHeight: 352, display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ alignSelf: 'flex-start', width: '100%', boxSizing: 'border-box', padding: 10, border: '1px dashed #b89ade', borderRadius: 9, background: '#fcfaff' }}>
         <div style={{ color: '#68429b', fontSize: 11, fontWeight: 700, marginBottom: 8 }}>本轮执行路径 · {demoMode ? playback.actionLabel : '运行时按真实事件高亮'}</div>
         <div style={{ display: 'grid', gridTemplateColumns: 'minmax(72px, 1fr) 18px minmax(72px, 1fr) 18px minmax(72px, 1fr)', alignItems: 'stretch', gap: 3 }}>
           <ReActStageCard label="LLM" detail="生成下一次行动计划" active={isActive('llm')} tone="#eaf8f1" onSelect={onSelectLLM} />
@@ -766,6 +778,16 @@ function ReActRuntimeDiagram({
           {leftArrow(isActive('invoke') || isActive('observation'))}
           <ReActStageCard label="调用" detail={playback.activeTool ? `目标：${playback.activeTool}` : '等待有效工具计划'} active={isActive('invoke')} tone="#fff5e5" />
         </div>
+      </div>
+      <div style={{ minHeight: 0, flex: 1, display: 'flex', flexDirection: 'column', padding: 10, border: '1px solid #b9cde8', borderRadius: 9, background: '#f7fbff' }}>
+        <div style={{ color: '#315e9e', fontSize: 11, fontWeight: 700, marginBottom: 7 }}>上下文详情</div>
+        {selectedContextMessage ? (
+          <>
+            <div style={{ color: selectedContextMessage.role === 'tool_definition' ? '#805300' : '#4d586a', fontSize: 10, fontWeight: 700, marginBottom: 5 }}>{contextMessageLabel(selectedContextMessage)}</div>
+            <pre style={{ margin: 0, minHeight: 0, flex: 1, overflowY: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: '#253a55', fontFamily: 'ui-monospace, Consolas, monospace', fontSize: 10, lineHeight: 1.45 }}>{selectedContextDetail}</pre>
+          </>
+        ) : <div style={{ color: '#697386', fontSize: 11, lineHeight: 1.45 }}>点击左侧上下文中的任意消息，在此查看完整内容与结构化工具定义。</div>}
+      </div>
       </div>
     </div>
   );
@@ -1596,9 +1618,9 @@ export default function AgentEditor({
               { label: '运行时间', value: terminalDemo ? totalElapsed : liveElapsed, help: '从 run.start 到当前实时事件或终止事件的总耗时，包含模型、工具与 Harness 开销。' },
               { label: '当前步骤', value: `${latestDemoEvent?.step ?? 0} / ${loopModule?.config.max_steps || document.max_steps}`, help: '当前 ReAct 决策步数 / 配置的最大执行步数。一次模型决策会推进一步。' },
               { label: '模型决策', value: demoStats.decisions, help: '收到并解析的 LLM 行动计划总数，包括工具调用、回答、追问与路由。' },
-              { label: '工具计划', value: demoStats.toolPlanned, help: 'LLM 在行动计划中提出的工具调用数量；一条 call_tools 可包含多个工具。' },
               { label: '回答', value: demoStats.finalAnswerDecisions, help: 'LLM 选择 final_answer 的次数，表示它认为已有足够证据输出结果。' },
               { label: '追问', value: demoStats.askUserDecisions, help: 'LLM 选择 ask_user 的次数，表示它请求用户补充信息后暂停运行。' },
+              { label: '工具计划', value: demoStats.toolPlanned, help: 'LLM 在行动计划中提出的工具调用数量；一条 call_tools 可包含多个工具。' },
               { label: '校验通过', value: demoStats.toolValidated, help: '通过 Harness Schema、能力、权限与参数校验的工具调用数量。' },
               { label: '开始执行', value: demoStats.toolStarted, help: '已实际交给工具执行器的调用数量；仅计划或被拦截的调用不计入。' },
               { label: '观察', value: demoStats.observations, help: '工具完成后写回 Context 的 Observation 数量。' },
@@ -1611,13 +1633,6 @@ export default function AgentEditor({
                 <strong style={{ color: '#172033', fontSize: 16 }}>{value}</strong>
               </div>
             ))}
-          </div>
-          <div style={{ margin: '-2px 0 10px', padding: '8px 10px', borderRadius: 7, background: '#ffffff', border: '1px solid #dce6f4', color: '#4d586a', fontSize: 12, lineHeight: 1.5 }}>
-            <strong style={{ color: '#172033' }}>有效决策构成：</strong>
-            工具调用 {demoStats.toolDecisions} · 最终答案 {demoStats.finalAnswerDecisions} · 追问 {demoStats.askUserDecisions} · 路由 {demoStats.routeDecisions}
-            <br />
-            <strong style={{ color: '#172033' }}>工具行动链：</strong>
-            计划 {demoStats.toolPlanned} → 校验 {demoStats.toolValidated} → 执行 {demoStats.toolStarted} → 观察 {demoStats.observations}
           </div>
           {Object.keys(demoStats.decisionErrorsByKind).length > 0 && (
             <p style={{ margin: '-2px 0 10px', color: '#a33a2b', fontSize: 12 }}>
