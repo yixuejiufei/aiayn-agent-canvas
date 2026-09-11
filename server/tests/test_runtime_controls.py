@@ -4,7 +4,7 @@ from uuid import uuid4
 
 from fastapi.testclient import TestClient
 
-from agentscratch.main import app
+from aiayn_agent_canvas.main import app
 from agentscratch.schemas import AgentRunState, MiniAgentSpec, RunStatus
 from agentscratch.storage import SQLiteStore
 

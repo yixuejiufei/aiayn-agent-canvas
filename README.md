@@ -1,4 +1,4 @@
-# AgentScratch
+# aiayn-agent-canvas
 
 面向初学者的「Agent 界的 Scratch」：用可视化积木与真实本地小模型，帮助用户理解 LLM Agent 的运行原理。
 
@@ -25,8 +25,9 @@ Agent 模块可选择两种工具调用协议：`JSON Action` 是为本地小模
 ### 后端
 
 ```bash
+python -m pip install -e ..\..\aiayn-agent-core\server
 cd server
-python -m uvicorn agentscratch.main:app --reload --port 8000
+python -m uvicorn aiayn_agent_canvas.main:app --reload --port 8000
 ```
 
 ### 前端
@@ -40,6 +41,7 @@ npm run dev
 ### 测试
 
 ```bash
+python -m pip install -e ..\..\aiayn-agent-core\server
 cd server
 python -m pytest -q
 ```
@@ -47,4 +49,3 @@ python -m pytest -q
 ## 当前状态
 
 M0 / M1 已完成基础工程闭环；M2 已完成本地真实 LLM 接入协议、Prompt Builder、JSON Action 解析、重试和事件可观测性。本地 Qwen2.5-0.5B-Instruct Q4_K_M 模型已接入并完成真实端到端运行。运行控制层现已支持 SQLite 持久化、SSE 事件流、单步执行、回放、暂停/继续、用户输入续跑和教学案例模板；前端已增加 ReAct 执行图、节点详情，以及可拖入节点、移动节点、连线、编辑属性、自动保存和导出 JSON 的 Agent 编排编辑器。编辑器现可运行条件分支、多 Agent 路由与受最大步数保护的循环连线。下一步是补充浏览器端到端测试与 Agent/Run 管理。
-

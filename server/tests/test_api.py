@@ -2,10 +2,10 @@ import time
 from threading import Event
 
 import pytest
-import agentscratch.main as main_module
+import aiayn_agent_canvas.main as main_module
 from fastapi.testclient import TestClient
 
-from agentscratch.main import app
+from aiayn_agent_canvas.main import app
 
 
 def test_health() -> None:

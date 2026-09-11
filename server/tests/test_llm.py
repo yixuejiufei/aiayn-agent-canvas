@@ -307,7 +307,7 @@ def test_tiny_llm_brain_reports_last_raw_output(monkeypatch: pytest.MonkeyPatch)
 
 
 def test_agent_api_accepts_brain_model():
-    from agentscratch.main import app
+    from aiayn_agent_canvas.main import app
     client = TestClient(app)
     response = client.post(
         "/api/v1/agents",

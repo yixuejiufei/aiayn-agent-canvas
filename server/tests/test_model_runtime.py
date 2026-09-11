@@ -33,6 +33,16 @@ def test_connection_recovers_surviving_managed_server(monkeypatch) -> None:
         def json(self) -> dict:
             return {"data": [{"id": "teaching-model"}]}
 
-    monkeypatch.setattr(httpx, "get", lambda *_args, **_kwargs: Response())
+    class Client:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args) -> None:
+            return None
+
+        def get(self, *_args, **_kwargs) -> Response:
+            return Response()
+
+    monkeypatch.setattr(httpx, "Client", lambda *_args, **_kwargs: Client())
     assert runtime.connection() == ("http://127.0.0.1:8081/v1", "teaching-model")
     assert runtime.active_status()["device"] == "reconnected"

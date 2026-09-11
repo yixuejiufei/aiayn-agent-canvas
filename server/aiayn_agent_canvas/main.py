@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import httpx
 import sqlite3
@@ -16,14 +17,16 @@ from fastapi import Body, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
-from .brain import ClarificationBrain, TestBrain
-from .cases import get_case as get_builtin_case, list_cases as list_builtin_cases
-from .events import EventSink
-from .llm import TinyLLMBrain
-from .model_runtime import local_model_runtime
-from .interpreter import AgentInterpreter, build_context
-from .workflow import WorkflowBrain, WorkflowValidationError, parse_module_ids, validate_workflow
-from .schemas import (
+os.environ.setdefault("AGENTSCRATCH_RUNTIME_ROOT", str(Path(__file__).resolve().parents[2]))
+
+from agentscratch.brain import ClarificationBrain, TestBrain
+from agentscratch.cases import get_case as get_builtin_case, list_cases as list_builtin_cases
+from agentscratch.events import EventSink
+from agentscratch.llm import TinyLLMBrain
+from agentscratch.model_runtime import local_model_runtime
+from agentscratch.interpreter import AgentInterpreter, build_context
+from agentscratch.workflow import WorkflowBrain, WorkflowValidationError, parse_module_ids, validate_workflow
+from agentscratch.schemas import (
     AgentEvent,
     AgentPolicy,
     AgentRunState,
@@ -39,14 +42,14 @@ from .schemas import (
     ToolSpec,
     WorkflowSpec,
 )
-from .tools import (
+from agentscratch.tools import (
     available_tool_names,
     choose_teaching_workspace_directory,
     teaching_resources,
     teaching_workspace_index,
     teaching_workspace_tree,
 )
-from .storage import SQLiteStore
+from agentscratch.storage import SQLiteStore
 
 
 app = FastAPI(title="AgentScratch API", version="0.1.0")
