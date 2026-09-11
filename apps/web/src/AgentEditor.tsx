@@ -257,7 +257,7 @@ function describeDemoPhase(event: DemoEvent): string {
     return '正在将运行反馈写回上下文';
   }
   return ({
-    'run.start': '正在准备用户输入',
+    'run.start': '正在初始化运行',
     'context.build': '正在组装上下文',
     'context.request': '上下文已送入模型',
     'llm.start': '模型正在推理',
@@ -305,7 +305,11 @@ function replayReActContext(events: DemoEvent[], pendingPhase?: 'context' | 'llm
     : [];
   const initialMessageCount = Array.isArray(firstSnapshot?.data.messages) ? firstSnapshot.data.messages.length : snapshotMessages.length;
   const requestSnapshot = [...events].reverse().find((event) => event.type === 'context.request');
-  const requestTools = Array.isArray(requestSnapshot?.data.tools) ? requestSnapshot.data.tools : [];
+  // During ``context.build`` the request has not been dispatched yet.  The
+  // backend includes the assembled capability definitions on that event, so
+  // the yellow tool section is already visible before ``context.request``.
+  const toolSnapshot = requestSnapshot || snapshot;
+  const requestTools = Array.isArray(toolSnapshot?.data.tools) ? toolSnapshot.data.tools : [];
   const toolDefinitions = requestTools.flatMap((tool) => {
     if (!tool || typeof tool !== 'object') return [];
     const definition = tool as Record<string, unknown>;
@@ -313,11 +317,14 @@ function replayReActContext(events: DemoEvent[], pendingPhase?: 'context' | 'llm
     return [{ role: 'tool_definition', name, content: definition } satisfies ContextGrowthMessage];
   });
   // Tool schemas are part of every model request, but not conversation
-  // messages.  Place them after the authored System/User messages, then keep
-  // subsequent observations and actions green as growing runtime Context.
+  // messages.  Teach their conceptual assembly order as System -> tools ->
+  // User, then render all later Observations/actions as growing Context.
   const baseMessages = snapshotMessages.slice(0, initialMessageCount);
-  const messages = [...baseMessages, ...toolDefinitions, ...snapshotMessages.slice(initialMessageCount)];
-  const initialMessageCountWithTools = baseMessages.length + toolDefinitions.length;
+  const systemMessages = baseMessages.filter((message) => message.role === 'system');
+  const userMessages = baseMessages.filter((message) => message.role === 'user');
+  const otherBaseMessages = baseMessages.filter((message) => message.role !== 'system' && message.role !== 'user');
+  const messages = [...systemMessages, ...toolDefinitions, ...userMessages, ...otherBaseMessages, ...snapshotMessages.slice(initialMessageCount)];
+  const initialMessageCountWithTools = systemMessages.length + toolDefinitions.length + userMessages.length + otherBaseMessages.length;
   if (lastSnapshotIndex >= 0) {
     events.slice(lastSnapshotIndex + 1).forEach((event) => {
       if (event.type !== 'context.append') return;
@@ -401,7 +408,7 @@ const nodeColors: Record<EditorNodeType, { background: string; border: string; l
   input: { background: '#eaf4ff', border: '#5a9ee8', label: '#1e5c99' },
   user_input: { background: '#f0f8ff', border: '#6ca9df', label: '#245f95' },
   system_prompt: { background: '#eef5ff', border: '#759ad8', label: '#315e9e' },
-  tool_definition: { background: '#eef5ff', border: '#759ad8', label: '#315e9e' },
+  tool_definition: { background: '#fff5e5', border: '#e1a64e', label: '#8a5a00' },
   react_loop: { background: '#f5edff', border: '#9a6fd1', label: '#68429b' },
   agent: { background: '#eaf8f1', border: '#54ad7a', label: '#18794e' },
   tool: { background: '#fff5e5', border: '#e1a64e', label: '#8a5a00' },
@@ -449,7 +456,7 @@ function initialDocument(): WorkflowDocument {
       newNode('user_input', 24, 320, 1),
       { ...newNode('input', 0, 0, 1), parentId: 'react_loop-1', config: { user_input_module_id: 'user_input-1', context_window_size: '8192' } },
       { ...newNode('system_prompt', 24, 118, 1), parentId: 'input-1' },
-      { ...newNode('tool_definition', 0, 0, 1), parentId: 'input-1', config: { tool_ids: '["tool-1"]' } },
+      { ...newNode('tool_definition', 1018, 68, 1), parentId: 'input-1', config: { tool_ids: '["tool-1"]' } },
       newNode('tool', 1020, 205, 1),
       newNode('react_loop', 235, 86, 1),
       { ...newNode('agent', 0, 0, 1), parentId: 'react_loop-1', config: { ...newNode('agent', 0, 0, 1).config, tool_ids: '["tool-1"]' } },
@@ -473,7 +480,7 @@ function teachingCaseDocument(caseId: 'direct-answer' | 'tool-call' | 'file-summ
         { ...newNode('user_input', 24, 372, 3), config: { text: '请在“季度报告”目录中找到“华东销售复盘.md”，阅读后概括其中三项主要结论。' } },
         { ...newNode('system_prompt', 24, 116, 3), parentId: 'input-3', config: { content: '你是可靠的文件总结 Agent。先判断用户是否给出了足以定位文件的信息；不足时用 ask_user 追问，不能猜测目录或 file_id。调用 search_files 时，可省略 directory 或使用“.”搜索授权根目录；只能用成功搜索 Observation 返回的真实 file_id 调用 read_file。读取后，按用户要求总结并结束。' } },
         { ...newNode('input', 0, 0, 3), parentId: 'react_loop-3', config: { user_input_module_id: 'user_input-3', context_window_size: '8192' } },
-        { ...newNode('tool_definition', 0, 0, 3), parentId: 'input-3', config: { tool_ids: '["search-files-3","read-file-3"]' } },
+        { ...newNode('tool_definition', 1018, 68, 3), parentId: 'input-3', config: { tool_ids: '["search-files-3","read-file-3"]' } },
         { ...newNode('react_loop', 255, 86, 3), config: { max_steps: '8', max_decision_failures: '2', max_tool_failures: '2' } },
         { ...newNode('agent', 0, 0, 3), parentId: 'react_loop-3', config: { ...newNode('agent', 0, 0, 3).config, brain_type: 'test', tool_ids: '["search-files-3","read-file-3"]', prompt: '先搜索、再读取、最后总结。每一步只做完成当前子目标所需的行动。' } },
         { ...newNode('tool', 1120, 170, 3), id: 'search-files-3', label: '搜索文件', config: { tool: 'search_files', risk: 'read', permission: 'granted', requires_confirmation: 'false', parallel_safe: 'true' } },
@@ -496,7 +503,7 @@ function teachingCaseDocument(caseId: 'direct-answer' | 'tool-call' | 'file-summ
         { ...newNode('user_input', 24, 378, 4), config: { text: '请先查询工作目录，再让我选择要总结的文件。我暂不指定具体文件名；请根据搜索结果给出最可能的 1-3 个选项。' } },
         { ...newNode('system_prompt', 24, 116, 4), parentId: 'input-4', config: { content: '你是可靠的文件总结 Agent。用户未给出文件名时，先调用 search_files 浏览授权工作目录的文件元数据：使用 directory="."，并省略 file_name。根据成功的搜索 Observation，列出最多 3 个候选，并由任务决定 ask_user 的单选或多选：args.response_schema 必须包含 type:file_selection、source_observation、candidate_file_ids、allow_custom_input:true、selection_mode:single 或 multiple、min_selections、max_selections。用户确认后，只能用该搜索 Observation 中经用户授权的 file_id 调用 read_file；多选时可分别读取每个授权 ID。' } },
         { ...newNode('input', 0, 0, 4), parentId: 'react_loop-4', config: { user_input_module_id: 'user_input-4', context_window_size: '8192' } },
-        { ...newNode('tool_definition', 0, 0, 4), parentId: 'input-4', config: { tool_ids: '["search-files-4","read-file-4"]' } },
+        { ...newNode('tool_definition', 1018, 68, 4), parentId: 'input-4', config: { tool_ids: '["search-files-4","read-file-4"]' } },
         { ...newNode('react_loop', 255, 86, 4), config: { max_steps: '8', max_decision_failures: '2', max_tool_failures: '2' } },
         { ...newNode('agent', 0, 0, 4), parentId: 'react_loop-4', config: { ...newNode('agent', 0, 0, 4).config, brain_type: 'test', tool_ids: '["search-files-4","read-file-4"]', prompt: '先浏览工作目录，再基于搜索 Observation 追问用户。用户选择后读取对应 file_id，最后输出总结。' } },
         { ...newNode('tool', 1120, 152, 5), id: 'search-files-4', label: '搜索文件', config: { tool: 'search_files', risk: 'read', permission: 'granted', requires_confirmation: 'false', parallel_safe: 'true' } },
@@ -598,7 +605,12 @@ function normalizeToolReferences(document: WorkflowDocument): WorkflowDocument {
       if (readFileId && searchFilesId && repaired.includes(readFileId) && !repaired.includes(searchFilesId)) {
         repaired.push(searchFilesId);
       }
-      return { ...node, config: { ...node.config, tool_ids: JSON.stringify(repaired) } };
+      const needsVisibleToolDefinitionPosition = node.type === 'tool_definition' && node.x === 0 && node.y === 0;
+      return {
+        ...node,
+        ...(needsVisibleToolDefinitionPosition ? { x: 1018, y: 68 } : {}),
+        config: { ...node.config, tool_ids: JSON.stringify(repaired) },
+      };
     }),
   };
 }
@@ -655,6 +667,7 @@ function ReActRuntimeDiagram({
   onSelectModule,
   userInputModule,
   systemPromptModules = [],
+  toolDefinitionModules = [],
   contextWindowTokens = 8192,
 }: {
   playback: ReActPlayback;
@@ -665,6 +678,7 @@ function ReActRuntimeDiagram({
   onSelectModule?: (nodeId: string) => void;
   userInputModule?: EditorNode | null;
   systemPromptModules?: EditorNode[];
+  toolDefinitionModules?: EditorNode[];
   contextWindowTokens?: number;
 }) {
   const initialMessages = playback.messages.slice(0, playback.initialMessageCount);
@@ -687,10 +701,11 @@ function ReActRuntimeDiagram({
           <strong style={{ color: '#245f95', fontSize: 12 }}>上下文</strong>
           <span style={{ color: '#5b6475', fontSize: 10 }}>约 {estimatedTokens} / {contextWindowTokens} tokens · {usedPercent.toFixed(1)}%</span>
         </div>
-        {!demoMode && (userInputModule || systemPromptModules.length > 0) && (
+        {!demoMode && (userInputModule || systemPromptModules.length > 0 || toolDefinitionModules.length > 0) && (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 5, margin: '5px 0 8px' }}>
-            {userInputModule && <button data-context-reference-id={userInputModule.id} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onSelectModule?.(userInputModule.id); }} style={{ padding: '5px 6px', border: '1px solid #6ca9df', borderRadius: 5, background: '#f0f8ff', color: '#245f95', fontSize: 10, cursor: onSelectModule ? 'pointer' : 'default', textAlign: 'left' }}>用户输入 ↗ {userInputModule.label}</button>}
             {systemPromptModules.map((module) => <button key={module.id} data-context-reference-id={module.id} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onSelectModule?.(module.id); }} style={{ padding: '5px 6px', border: '1px solid #759ad8', borderRadius: 5, background: '#eef5ff', color: '#315e9e', fontSize: 10, cursor: onSelectModule ? 'pointer' : 'default', textAlign: 'left' }}>系统提示词 ↗ {module.label}</button>)}
+            {toolDefinitionModules.map((module) => <button key={module.id} data-context-reference-id={module.id} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onSelectModule?.(module.id); }} style={{ padding: '5px 6px', border: '1px solid #e1a64e', borderRadius: 5, background: '#fff5e5', color: '#8a5a00', fontSize: 10, cursor: onSelectModule ? 'pointer' : 'default', textAlign: 'left' }}>工具定义 ↗ {module.label}</button>)}
+            {userInputModule && <button data-context-reference-id={userInputModule.id} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onSelectModule?.(userInputModule.id); }} style={{ padding: '5px 6px', border: '1px solid #6ca9df', borderRadius: 5, background: '#f0f8ff', color: '#245f95', fontSize: 10, cursor: onSelectModule ? 'pointer' : 'default', textAlign: 'left' }}>用户输入 ↗ {userInputModule.label}</button>}
           </div>
         )}
         {!demoMode && embeddedModules.length > 0 && (
@@ -965,6 +980,9 @@ export default function AgentEditor({
   const contextSystemPromptModules = loopContextModule
     ? document.nodes.filter((node) => node.type === 'system_prompt' && node.parentId === loopContextModule.id)
     : [];
+  const contextToolDefinitionModules = loopContextModule
+    ? document.nodes.filter((node) => node.type === 'tool_definition' && node.parentId === loopContextModule.id)
+    : [];
   const contextWindowTokens = Math.min(131072, Math.max(256, Number(loopContextModule?.config.context_window_size) || 8192));
   const activeToolModule = reactPlayback.activeStages.has('invoke') && reactPlayback.activeTool
     ? toolModules.find((node) => node.config.tool === reactPlayback.activeTool) || null
@@ -981,18 +999,24 @@ export default function AgentEditor({
   const waitingMinSelections = waitingResponseSchema?.min_selections ?? 1;
   const waitingMaxSelections = waitingResponseSchema?.max_selections ?? (multipleFileSelection ? waitingChoices.length : 1);
   const activeWaitingSelectionIds = waitingSelectionIds.filter((fileId) => waitingChoices.some((choice) => choice.file_id === fileId));
-  const demoFocusId = (() => {
-    if (demoPendingPhase === 'llm') return document.nodes.find((node) => node.type === 'agent')?.id || null;
-    if (demoPendingPhase === 'context') return document.nodes.find((node) => node.type === 'input')?.id || null;
-    if (!latestDemoEvent) return null;
-    if (latestDemoEvent.type === 'run.start') return document.nodes.find((node) => node.type === 'user_input' && !node.parentId)?.id || null;
-    if (latestDemoEvent.type === 'context.build' || latestDemoEvent.type === 'context.request' || latestDemoEvent.type === 'context.append' || latestDemoEvent.type === 'tool.end') return document.nodes.find((node) => node.type === 'input')?.id || null;
-    if (latestDemoEvent.type === 'llm.start') return document.nodes.find((node) => node.type === 'agent')?.id || null;
-    if (latestDemoEvent.type === 'llm.end' || latestDemoEvent.type === 'action.validate') return document.nodes.find((node) => node.type === 'agent')?.id || null;
-    if (latestDemoEvent.type === 'tool.start') return document.nodes.find((node) => node.type === 'tool' && node.config.tool === latestDemoEvent.node)?.id || null;
-    if (latestDemoEvent.type === 'agent.waiting_user') return document.nodes.find((node) => node.type === 'ask_user')?.id || document.nodes.find((node) => node.type === 'agent')?.id || null;
-    if (latestDemoEvent.type === 'agent.finish') return document.nodes.find((node) => node.type === 'final')?.id || null;
-    return null;
+  const contextAssemblyModuleIds = [
+    contextUserInputModule?.id,
+    ...contextSystemPromptModules.map((node) => node.id),
+    ...contextToolDefinitionModules.map((node) => node.id),
+  ].filter((id): id is string => Boolean(id));
+  const demoFocusIds = (() => {
+    if (demoPendingPhase === 'llm') return [document.nodes.find((node) => node.type === 'agent')?.id].filter((id): id is string => Boolean(id));
+    if (demoPendingPhase === 'context') return [loopContextModule?.id, ...contextAssemblyModuleIds].filter((id): id is string => Boolean(id));
+    if (!latestDemoEvent) return [];
+    if (latestDemoEvent.type === 'run.start') return contextAssemblyModuleIds;
+    if (latestDemoEvent.type === 'context.build') return [loopContextModule?.id, ...contextAssemblyModuleIds].filter((id): id is string => Boolean(id));
+    if (latestDemoEvent.type === 'context.request' || latestDemoEvent.type === 'context.append' || latestDemoEvent.type === 'tool.end') return [loopContextModule?.id].filter((id): id is string => Boolean(id));
+    if (latestDemoEvent.type === 'llm.start') return [document.nodes.find((node) => node.type === 'agent')?.id].filter((id): id is string => Boolean(id));
+    if (latestDemoEvent.type === 'llm.end' || latestDemoEvent.type === 'action.validate') return [document.nodes.find((node) => node.type === 'agent')?.id].filter((id): id is string => Boolean(id));
+    if (latestDemoEvent.type === 'tool.start') return [document.nodes.find((node) => node.type === 'tool' && node.config.tool === latestDemoEvent.node)?.id].filter((id): id is string => Boolean(id));
+    if (latestDemoEvent.type === 'agent.waiting_user') return [document.nodes.find((node) => node.type === 'ask_user')?.id || document.nodes.find((node) => node.type === 'agent')?.id].filter((id): id is string => Boolean(id));
+    if (latestDemoEvent.type === 'agent.finish') return [document.nodes.find((node) => node.type === 'final')?.id].filter((id): id is string => Boolean(id));
+    return [];
   })();
   const demoPhase = demoPendingPhase === 'llm'
     ? '模型正在推理'
@@ -1001,7 +1025,7 @@ export default function AgentEditor({
       : latestDemoEvent
     ? describeDemoPhase(latestDemoEvent)
     : '等待运行开始';
-  const canvasVisibleNodes = document.nodes.filter((node) => !node.parentId || node.type === 'system_prompt');
+  const canvasVisibleNodes = document.nodes.filter((node) => !node.parentId || node.type === 'system_prompt' || node.type === 'tool_definition');
   const canvasWidth = Math.max(1000, canvasViewportWidth, ...canvasVisibleNodes.map((node) => node.x + renderedNodeWidth(node) + 40));
   const canvasHeight = Math.max(640, ...canvasVisibleNodes.map((node) => node.y + renderedNodeHeight(node) + 40));
 
@@ -1766,7 +1790,7 @@ export default function AgentEditor({
               const reactContextModule = node.type === 'react_loop' ? containedModules.find((item) => item.type === 'input') : null;
               const reactLLMModule = node.type === 'react_loop' ? containedModules.find((item) => item.type === 'agent') : null;
               const contextChildren = reactContextModule ? document.nodes.filter((item) => item.parentId === reactContextModule.id) : [];
-              const runtimeFocused = node.id === demoFocusId || (node.type === 'react_loop' && containedModules.some((item) => item.id === demoFocusId));
+              const runtimeFocused = demoFocusIds.includes(node.id) || (node.type === 'react_loop' && containedModules.some((item) => demoFocusIds.includes(item.id)));
               const connectable = ['user_input', 'input', 'react_loop', 'agent', 'condition', 'ask_user', 'final'].includes(node.type);
               return (
                 <div
@@ -1834,6 +1858,7 @@ export default function AgentEditor({
                       onSelectModule={!demoMode ? (nodeId) => setSelectedNodeId(nodeId) : undefined}
                       userInputModule={contextUserInputModule}
                       systemPromptModules={contextSystemPromptModules}
+                      toolDefinitionModules={contextToolDefinitionModules}
                       contextWindowTokens={contextWindowTokens}
                     />
                   ) : (
@@ -1857,7 +1882,7 @@ export default function AgentEditor({
                       {containedModules.length === 0 ? <div style={{ color: '#697386', fontSize: 11 }}>可从模块库添加系统提示词或工具定义模块。</div> : (
                         <div style={{ display: 'grid', gap: 6 }}>
                           {containedModules.map((child) => (
-                            <div key={child.id} onPointerDown={(event) => event.stopPropagation()} style={{ textAlign: 'left', padding: 7, border: child.id === demoFocusId ? '2px solid #ffbf47' : '1px solid #9db7de', borderRadius: 6, background: child.id === demoFocusId ? '#fff8df' : '#ffffff', color: '#315e9e', fontSize: 11, transition: 'all 180ms ease' }}>
+                            <div key={child.id} onPointerDown={(event) => event.stopPropagation()} style={{ textAlign: 'left', padding: 7, border: demoFocusIds.includes(child.id) ? '2px solid #ffbf47' : '1px solid #9db7de', borderRadius: 6, background: demoFocusIds.includes(child.id) ? '#fff8df' : '#ffffff', color: '#315e9e', fontSize: 11, transition: 'all 180ms ease' }}>
                               <button onClick={(event) => { event.stopPropagation(); setSelectedNodeId(child.id); }} style={{ border: 0, padding: 0, background: 'transparent', color: 'inherit', textAlign: 'left', cursor: 'pointer', font: 'inherit', width: '100%' }}>
                                 {child.label} · {compactContent(child, toolModules)}
                               </button>
@@ -1893,6 +1918,22 @@ export default function AgentEditor({
                   <path
                     d={`M ${prompt.x + renderedNodeWidth(prompt)} ${prompt.y + renderedNodeHeight(prompt) / 2} C ${prompt.x + renderedNodeWidth(prompt) + 44} ${prompt.y + renderedNodeHeight(prompt) / 2}, ${contextReferenceAnchors[prompt.id].x - 44} ${contextReferenceAnchors[prompt.id].y}, ${contextReferenceAnchors[prompt.id].x} ${contextReferenceAnchors[prompt.id].y}`}
                     fill="none" stroke="#5478bc" strokeWidth="2.5" strokeDasharray="5 4" markerEnd="url(#editor-overlay-arrow)"
+                  />
+                </g>
+              ))}
+              {loopModule && contextToolDefinitionModules.map((definition) => contextReferenceAnchors[definition.id] && (
+                <g key={`context-tool-definition-link-front-${definition.id}`}>
+                  <path
+                    d={`M ${definition.x} ${definition.y + renderedNodeHeight(definition) / 2} C ${definition.x - 44} ${definition.y + renderedNodeHeight(definition) / 2}, ${contextReferenceAnchors[definition.id].x + 44} ${contextReferenceAnchors[definition.id].y}, ${contextReferenceAnchors[definition.id].x} ${contextReferenceAnchors[definition.id].y}`}
+                    fill="none" stroke="#d69416" strokeWidth="2.5" strokeDasharray="5 4" markerEnd="url(#editor-overlay-arrow)"
+                  />
+                </g>
+              ))}
+              {contextToolDefinitionModules.flatMap((definition) => selectedModuleIds(definition).map((toolId) => ({ definition, tool: toolModules.find((tool) => tool.id === toolId) }))).map(({ definition, tool }) => tool && (
+                <g key={`tool-definition-tool-link-${definition.id}-${tool.id}`}>
+                  <path
+                    d={`M ${definition.x + renderedNodeWidth(definition)} ${definition.y + renderedNodeHeight(definition) / 2} C ${definition.x + renderedNodeWidth(definition) + 34} ${definition.y + renderedNodeHeight(definition) / 2}, ${tool.x - 34} ${tool.y + renderedNodeHeight(tool) / 2}, ${tool.x} ${tool.y + renderedNodeHeight(tool) / 2}`}
+                    fill="none" stroke="#d69416" strokeWidth="2" strokeDasharray="5 4" markerEnd="url(#editor-overlay-arrow)"
                   />
                 </g>
               ))}
