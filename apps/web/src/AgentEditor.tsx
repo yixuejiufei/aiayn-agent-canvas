@@ -138,10 +138,40 @@ const decisionReasonLabels: Record<string, string> = {
   route: '路由', capability: '能力边界', workflow: '图结构', other: '其他',
 };
 
+type TeachingCaseId = 'direct-answer' | 'tool-call' | 'file-summary' | 'file-choice';
+
 const STORAGE_KEY = 'agentscratch.workflow.editor.v2';
+const ACTIVE_CASE_STORAGE_KEY = 'agentscratch.workflow.editor.active-teaching-case.v1';
+const CASE_DOCUMENT_STORAGE_PREFIX = 'agentscratch.workflow.editor.teaching-case.v1.';
 
 function persistDocument(document: WorkflowDocument) {
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(document));
+}
+
+function caseDocumentStorageKey(caseId: TeachingCaseId) {
+  return `${CASE_DOCUMENT_STORAGE_PREFIX}${caseId}`;
+}
+
+function persistTeachingCaseDocument(caseId: TeachingCaseId, document: WorkflowDocument) {
+  window.localStorage.setItem(caseDocumentStorageKey(caseId), JSON.stringify(document));
+}
+
+function isTeachingCaseId(value: string | null): value is TeachingCaseId {
+  return value === 'direct-answer' || value === 'tool-call' || value === 'file-summary' || value === 'file-choice';
+}
+
+function savedTeachingCaseId(): TeachingCaseId | null {
+  try {
+    const value = window.localStorage.getItem(ACTIVE_CASE_STORAGE_KEY);
+    return isTeachingCaseId(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function persistActiveTeachingCase(caseId: TeachingCaseId | null) {
+  if (caseId) window.localStorage.setItem(ACTIVE_CASE_STORAGE_KEY, caseId);
+  else window.localStorage.removeItem(ACTIVE_CASE_STORAGE_KEY);
 }
 const NODE_WIDTH = 188;
 const NODE_HEIGHT = 112;
@@ -478,7 +508,7 @@ function initialDocument(): WorkflowDocument {
   };
 }
 
-function teachingCaseDocument(caseId: 'direct-answer' | 'tool-call' | 'file-summary' | 'file-choice'): WorkflowDocument {
+function teachingCaseDocument(caseId: TeachingCaseId): WorkflowDocument {
   if (caseId === 'file-summary') {
     return {
       version: '0.1',
@@ -541,6 +571,14 @@ function teachingCaseDocument(caseId: 'direct-answer' | 'tool-call' | 'file-summ
   return { ...toolCase, name: '教学案例 1：直接回答', nodes };
 }
 
+function detectTeachingCaseId(document: WorkflowDocument): TeachingCaseId | null {
+  if (document.name === '教学案例 1：直接回答') return 'direct-answer';
+  if (document.name === '教学案例 2：调用计算器') return 'tool-call';
+  if (document.name === '教学案例 3：搜索文件后读取并总结') return 'file-summary';
+  if (document.name === '教学案例 4：搜索后追问并总结文件') return 'file-choice';
+  return null;
+}
+
 export function persistWorkflowDocument(document: WorkflowDocument) {
   persistDocument(document);
 }
@@ -549,10 +587,17 @@ function loadDocument(): WorkflowDocument {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return initialDocument();
+    return parseStoredDocument(raw) || initialDocument();
+  } catch {
+    return initialDocument();
+  }
+}
+
+function parseStoredDocument(raw: string | null): WorkflowDocument | null {
+  if (!raw) return null;
+  try {
     const parsed = JSON.parse(raw) as WorkflowDocument;
-    if (!parsed || parsed.version !== '0.1' || !Array.isArray(parsed.nodes) || !Array.isArray(parsed.edges)) {
-      return initialDocument();
-    }
+    if (!parsed || parsed.version !== '0.1' || !Array.isArray(parsed.nodes) || !Array.isArray(parsed.edges)) return null;
     return normalizeToolReferences({
       ...parsed,
       max_steps: Math.min(60, Math.max(1, parsed.max_steps ?? 10)),
@@ -561,7 +606,15 @@ function loadDocument(): WorkflowDocument {
       nodes: parsed.nodes.map((node) => node.type === 'agent' && node.label === 'Agent' ? { ...node, label: 'LLM' } : node),
     });
   } catch {
-    return initialDocument();
+    return null;
+  }
+}
+
+function savedTeachingCaseDocument(caseId: TeachingCaseId): WorkflowDocument | null {
+  try {
+    return parseStoredDocument(window.localStorage.getItem(caseDocumentStorageKey(caseId)));
+  } catch {
+    return null;
   }
 }
 
@@ -846,10 +899,12 @@ export default function AgentEditor({
   navigationPanels?: ReactNode;
 }) {
   const [document, setDocument] = useState<WorkflowDocument>(() => loadDocument());
+  const [activeTeachingCase, setActiveTeachingCase] = useState<TeachingCaseId | null>(() => savedTeachingCaseId() || detectTeachingCaseId(loadDocument()));
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [connectingFrom, setConnectingFrom] = useState<string | null>(null);
   const [status, setStatus] = useState('草稿已自动保存到本地浏览器');
   const documentRef = useRef(document);
+  const activeTeachingCaseRef = useRef(activeTeachingCase);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const movingRef = useRef<MovingNode | null>(null);
   const suppressNodeClickRef = useRef<string | null>(null);
@@ -878,10 +933,18 @@ export default function AgentEditor({
   const [waitingSubmitError, setWaitingSubmitError] = useState<string | null>(null);
   const [waitingSubmitting, setWaitingSubmitting] = useState(false);
 
+  function persistCurrentDocument(next: WorkflowDocument) {
+    persistDocument(next);
+    const caseId = activeTeachingCaseRef.current;
+    if (caseId) persistTeachingCaseDocument(caseId, next);
+  }
+
   useEffect(() => {
     documentRef.current = document;
-    persistDocument(document);
-  }, [document]);
+    activeTeachingCaseRef.current = activeTeachingCase;
+    persistActiveTeachingCase(activeTeachingCase);
+    persistCurrentDocument(document);
+  }, [document, activeTeachingCase]);
 
   useEffect(() => {
     // React's type definitions do not consistently expose these Chromium
@@ -895,7 +958,7 @@ export default function AgentEditor({
   useEffect(() => {
     // `pagehide` also covers a quick F5 immediately after dropping a module.
     // The latest drag position is kept in the ref synchronously below.
-    const persistBeforeLeave = () => persistDocument(documentRef.current);
+    const persistBeforeLeave = () => persistCurrentDocument(documentRef.current);
     window.addEventListener('pagehide', persistBeforeLeave);
     return () => window.removeEventListener('pagehide', persistBeforeLeave);
   }, []);
@@ -930,7 +993,7 @@ export default function AgentEditor({
         // Persist the exact pointer position in the same event.  Relying only
         // on the post-render effect could lose the last movement on a fast F5.
         documentRef.current = next;
-        persistDocument(next);
+        persistCurrentDocument(next);
         return next;
       });
     }
@@ -1421,22 +1484,26 @@ export default function AgentEditor({
   function resetDocument() {
     if (!window.confirm('确定要清空当前编排并恢复示例流程吗？')) return;
     const fresh = initialDocument();
+    setActiveTeachingCase(null);
     setDocument(fresh);
     setSelectedNodeId(null);
     setStatus('已恢复示例流程');
   }
 
-  function loadTeachingCase(caseId: 'direct-answer' | 'tool-call' | 'file-summary' | 'file-choice') {
-    const next = teachingCaseDocument(caseId);
+  function loadTeachingCase(caseId: TeachingCaseId) {
+    const restored = savedTeachingCaseDocument(caseId);
+    const next = restored || teachingCaseDocument(caseId);
+    setActiveTeachingCase(caseId);
     setDocument(next);
     setSelectedNodeId(null);
-    setStatus(caseId === 'direct-answer'
+    const description = caseId === 'direct-answer'
       ? '已载入案例 1：一问一答，不调用工具'
       : caseId === 'tool-call'
         ? '已载入案例 2：调用 calculator 后观察结果'
         : caseId === 'file-summary'
           ? '已载入案例 3：先搜索文件，再读取并总结'
-          : '已载入案例 4：先搜索候选文件，再 ask_user 续跑');
+          : '已载入案例 4：先搜索候选文件，再 ask_user 续跑';
+    setStatus(restored ? `${description}（已恢复本地保存的布局与配置）` : description);
   }
 
   function exportDocument() {
